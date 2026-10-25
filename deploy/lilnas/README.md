@@ -36,6 +36,28 @@ verified sign-in…") fails by timing even when rerun alone; it covers desktop
 ChatGPT sign-in, which this web setup doesn't use. While that's true, `-Test`
 will refuse to switch, so use it to inspect results rather than as a gate.
 
+## Data and backups
+
+`~/learnharness-data` holds everything that matters: `data/chats`,
+`data/graph`, `data/jobs`, `data/settings.json`, `auth.json` (API keys) and
+`acp-host.json`. It was seeded on 2026-10-25 from the Windows desktop app
+(0.3.6): 2 sessions, 41 graph nodes, the DeepSeek key, with the server's
+Claude Code connection and model slots kept.
+
+Every deploy saves it to `~/backups/learnharness-data-<time>-before-<commit>.tgz`
+(app stopped during the copy, owner-only permissions, last 10 kept). To restore
+one:
+
+```bash
+systemctl --user stop learnharness
+mv ~/learnharness-data ~/learnharness-data.broken
+tar -xzf ~/backups/<backup>.tgz -C ~
+systemctl --user start learnharness
+```
+
+If the backup came from before a newer release changed the data format, also
+roll back the release (below) before starting it.
+
 ## Operating it (SSH in as learnharness)
 
 ```powershell

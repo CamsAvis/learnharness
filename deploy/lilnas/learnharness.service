@@ -19,6 +19,9 @@ Environment=PATH=%h/.local/opt/node/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/b
 ExecStart=%h/.local/opt/node/bin/node scripts/launch-app.mjs
 Restart=on-failure
 RestartSec=5
+# The server waits for open connections (the tunnel keeps some alive) before
+# exiting on SIGTERM; don't let a restart hang for systemd's default 90s.
+TimeoutStopSec=15
 
 [Install]
 WantedBy=default.target

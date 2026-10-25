@@ -21,6 +21,7 @@ RUN_TESTS=${2:-}
 REPO_URL=https://github.com/CamsAvis/learnharness.git
 PORT=3005
 KEEP=3
+KEEP_BACKUPS=10
 
 export PATH="$HOME/.local/opt/node/bin:$HOME/.local/bin:$PATH"
 export NEXT_TELEMETRY_DISABLED=1
@@ -111,6 +112,20 @@ PREV=""
 if [ -L "$HOME/current" ] && [ -d "$(readlink -f "$HOME/current")" ]; then
 	PREV=$(readlink -f "$HOME/current")
 fi
+# Upstream doesn't promise backward-compatible data formats, so snapshot the
+# data before a new release can touch it. The app is stopped for the copy so
+# no file is half-written. Backups include auth.json (API keys): owner-only.
+if [ -d "$HOME/learnharness-data" ]; then
+	log "Backing up data"
+	systemctl --user stop learnharness.service 2>/dev/null || true
+	mkdir -p "$HOME/backups"
+	chmod 700 "$HOME/backups"
+	BACKUP="$HOME/backups/learnharness-data-$(date +%Y%m%d-%H%M%S)-before-$SHORT.tgz"
+	(umask 077 && tar -czf "$BACKUP" -C "$HOME" learnharness-data)
+	echo "saved $(basename "$BACKUP") ($(du -h "$BACKUP" | cut -f1))"
+	ls -1t "$HOME"/backups/learnharness-data-*.tgz | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
+fi
+
 log "Activating $SHORT (previous: ${PREV:+$(basename "$PREV")}${PREV:-none})"
 ln -sfn "$DIR" "$HOME/current"
 systemctl --user enable --quiet learnharness.service
