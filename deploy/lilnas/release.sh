@@ -60,9 +60,16 @@ else
 	log "Installing dependencies"
 	npm ci --no-audit --no-fund --loglevel=error
 
+	# The default (Turbopack) build, as upstream CI does on Linux. The --webpack
+	# build the PR docs suggest for Windows drops pi-ai's provider catalog JSON
+	# from the standalone trace here, and the server then fails every request.
 	log "Building"
-	npm run build -- --webpack
+	npm run build
+	log "Checking the build's provider files"
+	node scripts/smoke-provider-runtime.mjs
 	node scripts/build-server.mjs
+	log "Checking that the built server starts (throwaway data)"
+	node scripts/smoke-server.mjs
 	touch "$DIR/.lh-built"
 fi
 
@@ -100,7 +107,10 @@ install -m 644 "$DIR/deploy/lilnas/learnharness.service" "$UNITS/"
 install -m 644 "$DIR/deploy/lilnas/learnharness-tunnel.service" "$UNITS/"
 systemctl --user daemon-reload
 
-PREV=$(readlink -f "$HOME/current" 2>/dev/null || true)
+PREV=""
+if [ -L "$HOME/current" ] && [ -d "$(readlink -f "$HOME/current")" ]; then
+	PREV=$(readlink -f "$HOME/current")
+fi
 log "Activating $SHORT (previous: ${PREV:+$(basename "$PREV")}${PREV:-none})"
 ln -sfn "$DIR" "$HOME/current"
 systemctl --user enable --quiet learnharness.service
