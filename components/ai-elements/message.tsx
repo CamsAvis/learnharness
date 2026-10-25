@@ -13,11 +13,12 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
+import { code, createCodePlugin } from "@streamdown/code";
 import { createMathPlugin } from "@streamdown/math";
 
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
+import { useCodeTheme } from "@/components/code-theme";
 import type { LhViewMessage } from "@/src/core";
 import {
   createContext,
@@ -355,8 +356,38 @@ export const streamdownPlugins = {
   math: createMathPlugin({ singleDollarTextMath: true }),
 } as unknown as PluginConfig;
 
+/** One Shiki plugin per uploaded theme, shared by every markdown surface
+ *  (a plugin per message would mean a highlighter per message). Themes are
+ *  never edited after upload, so the id is the cache key. */
+const customCodePlugins = new Map<string, PluginConfig>();
+
+/** The plugin set for the active theme: an uploaded theme's syntax colors
+ *  take its own slot of the light/dark pair (Tailwind's dark variant picks
+ *  the slot, as with the github pair). A new plugin object re-highlights
+ *  code blocks already on screen (streamdown keys its theme on it). */
+export function useStreamdownPlugins(): PluginConfig {
+  const theme = useCodeTheme();
+  return useMemo(() => {
+    if (!theme) return streamdownPlugins;
+    let plugins = customCodePlugins.get(theme.id);
+    if (!plugins) {
+      const shiki = { name: `lh-${theme.id}`, ...theme.code };
+      plugins = {
+        ...(streamdownPlugins as object),
+        code: createCodePlugin({
+          themes: theme.code.type === "dark" ? ["github-light", shiki] : [shiki, "github-dark"],
+        } as unknown as Parameters<typeof createCodePlugin>[0]),
+      } as unknown as PluginConfig;
+      customCodePlugins.set(theme.id, plugins);
+    }
+    return plugins;
+  }, [theme]);
+}
+
 export const MessageResponse = memo(
   ({ className, children, ...props }: MessageResponseProps) => {
+    // Context, not props: a theme switch re-renders this memoized component.
+    const plugins = useStreamdownPlugins();
     // Legacy backslash delimiters are converted in a single linear scan;
     // native dollar math passes through to Streamdown unchanged. Incomplete
     // legacy spans are left for a later render when their closer arrives.
@@ -374,7 +405,7 @@ export const MessageResponse = memo(
           className
         )}
         components={mdComponents}
-        plugins={streamdownPlugins}
+        plugins={plugins}
         {...props}
       >
         {content}

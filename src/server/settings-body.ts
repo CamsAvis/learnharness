@@ -25,6 +25,7 @@ import type {
 } from "../core/settings.ts";
 import { APPEARANCE_MODES, BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, isAppearanceMode } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
+import { CUSTOM_THEME_ID } from "../core/vscode-theme.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -208,7 +209,7 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 }
 
 /** appearance: { mode?, background?, fontFamily?, proseFontSize?,
- *  sessionNameSerif?, mdRendering? } */
+ *  sessionNameSerif?, mdRendering?, customThemeId? } */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -218,6 +219,12 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 			return { ok: false, error: `mode must be one of: ${APPEARANCE_MODES.join(", ")}` };
 		}
 		settings.mode = raw.mode;
+	}
+	if (raw.customThemeId !== undefined) {
+		if (raw.customThemeId !== null && (typeof raw.customThemeId !== "string" || !CUSTOM_THEME_ID.test(raw.customThemeId))) {
+			return { ok: false, error: "customThemeId must be an uploaded theme's id or null" };
+		}
+		settings.customThemeId = raw.customThemeId as string | null;
 	}
 	if (raw.background !== undefined) {
 		const parsed = parseHexOrNull(raw.background, "background");

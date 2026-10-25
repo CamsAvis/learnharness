@@ -35,6 +35,7 @@ export { effectivePromptSegments, allSegmentPaths, readPromptOverride } from "..
 export * from "./keys.ts";
 export * from "./search.ts";
 export { authStore } from "../store/auth.ts";
+export { addTheme, deleteTheme, getTheme, listThemes, ThemeStoreFullError } from "../store/themes.ts";
 export * from "./settings-body.ts";
 export * from "./turn-liveness.ts";
 export * from "./turn-runs.ts";

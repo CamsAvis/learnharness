@@ -33,6 +33,7 @@ import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
 import { ACP_AGENTS, parseAcpConfig, type AcpSettings } from "./acp.ts";
+import { CUSTOM_THEME_ID, customThemeClass } from "./vscode-theme.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -281,8 +282,9 @@ export interface MdRenderingSettings {
 /** The appearance modes. "light" is reserved for upstream's planned light
  *  palette (not built yet); "paper" is the warm ivory theme with burgundy
  *  accents (globals.css .paper); "onedark" is One Dark Pro's palette
- *  (globals.css .onedark). */
-export const APPEARANCE_MODES = ["dark", "light", "paper", "onedark"] as const;
+ *  (globals.css .onedark); "custom" is an uploaded VS Code theme, picked by
+ *  appearance.customThemeId (core/vscode-theme.ts). */
+export const APPEARANCE_MODES = ["dark", "light", "paper", "onedark", "custom"] as const;
 export type AppearanceMode = (typeof APPEARANCE_MODES)[number];
 
 export function isAppearanceMode(value: unknown): value is AppearanceMode {
@@ -291,19 +293,28 @@ export function isAppearanceMode(value: unknown): value is AppearanceMode {
 
 /** The modes the settings UI offers ("light" stays hidden until it has a
  *  palette, and resolves to dark meanwhile). */
-export type AppearanceChoice = "dark" | "paper" | "onedark";
+export type AppearanceChoice = "dark" | "paper" | "onedark" | "custom";
 
 export function appearanceChoice(mode: AppearanceMode | undefined): AppearanceChoice {
-	return mode === "paper" || mode === "onedark" ? mode : "dark";
+	return mode === "paper" || mode === "onedark" || mode === "custom" ? mode : "dark";
 }
 
 /** The class(es) the mode puts on <html>. One Dark Pro keeps "dark" too:
  *  code blocks switch to their dark syntax colors on Tailwind's dark
  *  variant, and .onedark (after .dark in globals.css) overrides the grey
- *  palette. Pure — the root layout (server) and the appearance provider
- *  (client) share it. */
-export function appearanceModeClass(mode: AppearanceMode | undefined): "dark" | "paper" | "dark onedark" {
+ *  palette. An uploaded theme gets "lh-custom" plus its own class (its
+ *  colors live in a style block keyed to that class), and "dark" when it is
+ *  a dark theme; with its theme missing, custom falls back to dark. Pure —
+ *  the root layout (server) and the appearance provider (client) share it. */
+export function appearanceModeClass(
+	mode: AppearanceMode | undefined,
+	custom?: { id: string; type: "dark" | "light" } | null,
+): string {
 	const choice = appearanceChoice(mode);
+	if (choice === "custom") {
+		if (!custom) return "dark";
+		return `${custom.type === "dark" ? "dark " : ""}lh-custom ${customThemeClass(custom.id)}`;
+	}
 	return choice === "onedark" ? "dark onedark" : choice;
 }
 
@@ -323,6 +334,9 @@ export interface AppearanceSettings {
 	/** Session names in CMU Serif (default true — today's look). */
 	sessionNameSerif?: boolean;
 	mdRendering?: MdRenderingSettings;
+	/** The uploaded theme mode "custom" shows (an id in the themes store,
+	 *  core/vscode-theme.ts). null/absent = none picked. */
+	customThemeId?: string | null;
 }
 
 /** Knowledge-graph settings — a strict dependency ladder (owner decision
@@ -422,6 +436,7 @@ export interface FactorySettings {
 			boldColor: string | null;
 			italicColor: string | null;
 		};
+		customThemeId: string | null;
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
@@ -437,6 +452,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 		proseFontSize: 16,
 		sessionNameSerif: true,
 		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
+		customThemeId: null,
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
@@ -589,6 +605,9 @@ function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	const sessionNameSerif = boolOrDrop(raw.sessionNameSerif);
 	if (sessionNameSerif !== undefined) out.sessionNameSerif = sessionNameSerif;
 	if (raw.mdRendering !== undefined) out.mdRendering = sanitizeMdRendering(raw.mdRendering);
+	if (raw.customThemeId !== undefined) {
+		out.customThemeId = typeof raw.customThemeId === "string" && CUSTOM_THEME_ID.test(raw.customThemeId) ? raw.customThemeId : null;
+	}
 	return out;
 }
 

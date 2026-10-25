@@ -114,6 +114,10 @@ export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
  */
 export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
 
+/** Uploaded VS Code themes (src/store/themes.ts), kept apart from
+ *  settings.json: appearance settings hold only the picked theme's id. */
+export const THEMES_FILE = path.join(DATA_ROOT, "themes.json");
+
 /**
  * User prompt-override files (settings-storage wave, 2026-09-19): the
  * per-segment system-prompt overrides mirroring the SOURCE layout

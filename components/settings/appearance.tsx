@@ -10,6 +10,10 @@
  * on <html> ("dark", "paper", or "dark onedark"): the root layout renders it
  * from the saved settings on the server, and this provider swaps it when
  * the setting changes. The palettes live in globals.css (.paper, .onedark).
+ * An uploaded VS Code theme ("custom") brings its palette as a style block
+ * keyed to its own class (core/vscode-theme.ts customThemeCss): the layout
+ * renders the saved one, and this provider writes the block for a theme
+ * picked later and hands its syntax colors to code blocks (CodeThemeContext).
  *
  * The provider is mounted at the ROOT LAYOUT level (like ActivityProvider):
  * every page picks appearance up on load. The settings page writes a
@@ -20,13 +24,25 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { FACTORY_SETTINGS, appearanceModeClass, type AppearanceSettings } from "@/src/core";
+import {
+	FACTORY_SETTINGS,
+	appearanceChoice,
+	appearanceModeClass,
+	customThemeCss,
+	type AppearanceSettings,
+	type CustomTheme,
+} from "@/src/core";
+import { CodeThemeContext } from "@/components/code-theme";
+
+/** The id of the head style block that carries a theme picked after load. */
+const LIVE_THEME_STYLE_ID = "lh-custom-theme-live";
 
 /** The resolved, fully-concrete appearance view (delta + factory merged). */
 export function resolveAppearance(delta: AppearanceSettings | undefined) {
 	const f = FACTORY_SETTINGS.appearance;
 	return {
 		mode: delta?.mode ?? f.mode,
+		customThemeId: delta?.customThemeId ?? f.customThemeId,
 		background: delta?.background ?? f.background,
 		fontFamily: delta?.fontFamily ?? f.fontFamily,
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,
@@ -77,9 +93,9 @@ export function derivedPalette(background: string): Record<string, string> {
 export function appearanceVars(a: ReturnType<typeof resolveAppearance>): Record<string, string> {
 	const vars: Record<string, string> = {};
 	// The custom background derives on the DARK curve (surfaces lighten), so it
-	// only applies in plain dark mode; Paper and One Dark Pro keep their own
-	// palettes (globals.css).
-	if (a.background !== null && appearanceModeClass(a.mode) === "dark") Object.assign(vars, derivedPalette(a.background));
+	// only applies in plain dark mode; Paper, One Dark Pro and uploaded themes
+	// keep their own palettes.
+	if (a.background !== null && appearanceChoice(a.mode) === "dark") Object.assign(vars, derivedPalette(a.background));
 	if (a.fontFamily !== null) {
 		vars["--font-prose"] = `"${a.fontFamily}", var(--font-sans3), ui-sans-serif, system-ui, sans-serif`;
 	}
@@ -115,31 +131,107 @@ interface AppearanceContextValue {
 	appearance: ReturnType<typeof resolveAppearance>;
 	/** Called by the settings page after a successful section PUT. */
 	onAppearanceChange: (delta: AppearanceSettings | undefined) => void;
+	/** The uploaded theme on screen (custom mode with its theme loaded). */
+	activeTheme: CustomTheme | null;
+	/** Hand over a theme the caller already has (a fresh upload), so picking
+	 *  it needs no fetch. */
+	rememberTheme: (theme: CustomTheme) => void;
 }
 
 const AppearanceContext = createContext<AppearanceContextValue>({
 	appearance: resolveAppearance(undefined),
 	onAppearanceChange: () => {},
+	activeTheme: null,
+	rememberTheme: () => {},
 });
 
 export function useAppearance() {
 	return useContext(AppearanceContext);
 }
 
-export function AppearanceProvider({ children }: { children: React.ReactNode }) {
+export function AppearanceProvider({
+	children,
+	initialTheme = null,
+}: {
+	children: React.ReactNode;
+	/** The uploaded theme the server rendered the page with, if any. */
+	initialTheme?: CustomTheme | null;
+}) {
 	const [delta, setDelta] = useState<AppearanceSettings | undefined>(undefined);
 	// The server already rendered <html> with the saved mode's class (root
 	// layout). Until the record arrives here the delta is unknown, so the
 	// class is left alone: syncing the factory "dark" first would flash.
 	const [loaded, setLoaded] = useState(false);
 	const appliedRef = useRef<string>("");
-	const modeClass = appearanceModeClass(resolveAppearance(delta).mode);
+	const resolved = resolveAppearance(delta);
+
+	// The uploaded theme custom mode points at: the one the page was
+	// rendered with, a fresh upload, or fetched when picked. A picked theme
+	// still loading keeps the current look (no flash of Dark); one that is
+	// gone (deleted elsewhere) renders as Dark.
+	const [themes, setThemes] = useState<Record<string, CustomTheme>>(() =>
+		initialTheme ? { [initialTheme.id]: initialTheme } : {},
+	);
+	const [missing, setMissing] = useState<string | null>(null);
+	const wantedId = resolved.mode === "custom" ? resolved.customThemeId : null;
+	const wanted = wantedId ? (themes[wantedId] ?? null) : null;
+	const pending = wantedId !== null && wanted === null && missing !== wantedId;
 	useEffect(() => {
-		if (!loaded) return;
+		if (!wantedId || themes[wantedId]) return;
+		let alive = true;
+		fetch(`/api/themes/${encodeURIComponent(wantedId)}`)
+			.then((r) => (r.ok ? r.json() : null))
+			.then((body: { theme?: CustomTheme } | null) => {
+				if (!alive) return;
+				if (body?.theme) setThemes((all) => ({ ...all, [wantedId]: body.theme! }));
+				else setMissing(wantedId);
+			})
+			.catch(() => {
+				if (alive) setMissing(wantedId);
+			});
+		return () => {
+			alive = false;
+		};
+	}, [wantedId, themes]);
+	const rememberTheme = useCallback((theme: CustomTheme) => {
+		setThemes((all) => ({ ...all, [theme.id]: theme }));
+	}, []);
+	// Before the record arrives, the page shows what the server rendered.
+	const activeTheme = loaded ? wanted : initialTheme;
+
+	const modeClass = appearanceModeClass(resolved.mode, wanted);
+	useEffect(() => {
+		if (!loaded || pending) return;
 		const root = document.documentElement;
-		root.classList.remove("dark", "paper", "onedark");
+		for (const name of [...root.classList]) {
+			if (name === "dark" || name === "paper" || name === "onedark" || name === "lh-custom" || name.startsWith("lh-theme-")) {
+				root.classList.remove(name);
+			}
+		}
 		root.classList.add(...modeClass.split(" "));
-	}, [loaded, modeClass]);
+	}, [loaded, pending, modeClass]);
+
+	// A theme picked after load gets its style block here (the one the page
+	// was rendered with already has the layout's). One block, the current
+	// theme only; leaving custom mode empties it.
+	const liveCss = useMemo(() => (loaded && wanted ? customThemeCss(wanted) : ""), [loaded, wanted]);
+	useEffect(() => {
+		let el = document.getElementById(LIVE_THEME_STYLE_ID);
+		if (!liveCss) {
+			el?.remove();
+			return;
+		}
+		if (!el) {
+			el = document.createElement("style");
+			el.id = LIVE_THEME_STYLE_ID;
+			document.head.appendChild(el);
+		}
+		el.textContent = liveCss;
+	}, [liveCss]);
+	const codeTheme = useMemo(
+		() => (activeTheme?.code ? { id: activeTheme.id, code: activeTheme.code } : null),
+		[activeTheme],
+	);
 
 	// The vars apply on every change — stringified as the change signal.
 	const vars = useMemo(() => appearanceVars(resolveAppearance(delta)), [delta]);
@@ -194,8 +286,12 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 	}, []);
 
 	const value = useMemo(
-		() => ({ appearance: resolveAppearance(delta), onAppearanceChange }),
-		[delta, onAppearanceChange],
+		() => ({ appearance: resolveAppearance(delta), onAppearanceChange, activeTheme, rememberTheme }),
+		[delta, onAppearanceChange, activeTheme, rememberTheme],
 	);
-	return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
+	return (
+		<AppearanceContext.Provider value={value}>
+			<CodeThemeContext.Provider value={codeTheme}>{children}</CodeThemeContext.Provider>
+		</AppearanceContext.Provider>
+	);
 }
