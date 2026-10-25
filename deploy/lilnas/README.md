@@ -27,7 +27,14 @@ open a TrueNAS proxy port to it; Cloudflare Access is the only gate.
 
 It syncs `main` with upstream, merges it into `deploy`, asks before taking new
 PR #94 commits, pushes, builds a new release on the container, switches to it
-and health-checks it (rolling back if it doesn't answer).
+and health-checks it (rolling back if it doesn't answer). Every build also runs
+upstream's provider-payload and server-boot checks before it can go live.
+
+`-Test` additionally runs typecheck and the full suite before switching. On this
+2-CPU container one upstream test (`chatgpt-auth.test.ts`, "repeated real
+verified sign-in…") fails by timing even when rerun alone; it covers desktop
+ChatGPT sign-in, which this web setup doesn't use. While that's true, `-Test`
+will refuse to switch, so use it to inspect results rather than as a gate.
 
 ## Operating it (SSH in as learnharness)
 
@@ -51,8 +58,16 @@ them through the tunnel), so connect from an SSH session:
 curl -s -X POST http://127.0.0.1:3005/api/acp/claude -H 'Content-Type: application/json' -H 'Origin: http://127.0.0.1:3005' -d '{}'
 ```
 
-Reconnect the same way after upgrading the adapter or changing plans. Then
-pick Claude Code for the model slots in Settings → Agent → Models.
+Reconnect the same way after upgrading the adapter or changing plans.
+
+Current model slots (Settings → Agent → Models): Strong = Claude Code Opus 5.5,
+Cheap and Vision = Claude Code Sonnet 5.5. Each session keeps the model it was
+started with; change an existing one with the picker under the composer.
+
+Installed and verified 2026-10-25: Claude Code 2.1.310 (native binary, installed
+with `--allow-scripts=@anthropic-ai/claude-code`) and claude-agent-acp 0.95.0.
+A real lesson turn through Opus 5.5 ran tool calls through the adapter and
+paused on the first question as designed.
 
 ## One-time setup (already done)
 
