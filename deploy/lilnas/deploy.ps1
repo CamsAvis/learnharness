@@ -27,7 +27,7 @@ $Ssh = @('-o', 'BatchMode=yes', '-o', 'ClearAllForwardings=yes', '-o', 'ServerAl
          '-i', "$HOME\.ssh\id_rsa", '-p', '5698', 'learnharness@192.168.1.2')
 $Pr = 94
 
-function Git {
+function Invoke-Git {
 	& git -C $Repo @args
 	if ($LASTEXITCODE -ne 0) { throw "git $($args -join ' ') failed" }
 }
@@ -35,20 +35,20 @@ function Step($text) { Write-Host "`n== $text" -ForegroundColor Cyan }
 
 try {
 	Step 'Checking the local clone'
-	if (Git status --porcelain) { throw "Uncommitted changes in $Repo. Commit or stash them first." }
-	$before = Git rev-parse --short deploy
+	if (Invoke-Git status --porcelain) { throw "Uncommitted changes in $Repo. Commit or stash them first." }
+	$before = Invoke-Git rev-parse --short deploy
 
 	Step 'Fetching upstream and PR #94'
-	Git fetch --quiet upstream
-	Git fetch --quiet upstream "+refs/pull/$Pr/head:refs/remotes/upstream/pr-$Pr"
-	Git fetch --quiet origin
+	Invoke-Git fetch --quiet upstream
+	Invoke-Git fetch --quiet upstream "+refs/pull/$Pr/head:refs/remotes/upstream/pr-$Pr"
+	Invoke-Git fetch --quiet origin
 
 	Step 'Syncing main with upstream'
-	Git switch --quiet main
-	Git merge --quiet --ff-only upstream/main
-	Git push --quiet origin main
-	Write-Host "main is at $(Git rev-parse --short main)"
-	Git switch --quiet deploy
+	Invoke-Git switch --quiet main
+	Invoke-Git merge --quiet --ff-only upstream/main
+	Invoke-Git push --quiet origin main
+	Write-Host "main is at $(Invoke-Git rev-parse --short main)"
+	Invoke-Git switch --quiet deploy
 
 	Step 'Merging upstream main into deploy'
 	& git -C $Repo merge-base --is-ancestor upstream/main deploy
@@ -68,7 +68,7 @@ try {
 	} elseif ($prState -eq 'CLOSED') {
 		Write-Warning "PR #$Pr was closed without merging. Keeping the version already in deploy."
 	} else {
-		$new = Git log --oneline "deploy..upstream/pr-$Pr"
+		$new = Invoke-Git log --oneline "deploy..upstream/pr-$Pr"
 		if (-not $new) { Write-Host "No new PR #$Pr commits." }
 		else {
 			Write-Host "New commits on PR #$Pr (third-party code):" -ForegroundColor Yellow
@@ -81,10 +81,10 @@ try {
 		}
 	}
 
-	$sha = Git rev-parse deploy
+	$sha = Invoke-Git rev-parse deploy
 	$after = $sha.Substring(0, 7)
 	Step "Pushing deploy ($before -> $after)"
-	Git push --quiet origin deploy
+	Invoke-Git push --quiet origin deploy
 
 	Step 'Building and switching on the container'
 	$flag = if ($Test) { '--test' } else { '' }
