@@ -48,6 +48,10 @@ export interface ServerEvents {
 	 *  the chat; the client mirrors it by disabling the composer/dock
 	 *  submit. */
 	"compaction-changed": { chatId: string; running: boolean };
+	/** A chat's lesson highlights changed (fork feature): announced by the
+	 *  highlight routes (the store stays silent). `source` is the writing
+	 *  tab's id, so that tab can skip its own echo; others refetch. */
+	"highlights-changed": { chatId: string; source?: string };
 }
 
 export type ServerEventType = keyof ServerEvents;
@@ -63,6 +67,7 @@ export const SERVER_EVENT_TYPES = [
 	"chats-changed",
 	"record-changed",
 	"compaction-changed",
+	"highlights-changed",
 ] as const satisfies readonly ServerEventType[];
 
 /** One notification: the type discriminates the payload. */

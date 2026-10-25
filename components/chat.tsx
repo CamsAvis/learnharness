@@ -37,6 +37,11 @@ import {
 	firstSourceTextParts,
 	messageAnchorId,
 	textPartMessageId,
+	answeredCardAnchor,
+	highlightAnchorsOf,
+	teacherTextAnchor,
+	userMessageAnchor,
+	type LessonHighlight,
 	kbdEventForAction as kbdEventForChat,
 	needsContinuation,
 	type ChatInput,
@@ -54,6 +59,8 @@ import { QuestionDock } from "@/components/question-dock";
 import { ClarifierPanel, useClarifier } from "@/components/question-clarifier";
 import { cn } from "@/lib/utils";
 import { SessionFind } from "@/components/session-find";
+import { HighlightLayer, HighlightsChip, useLessonHighlights } from "@/components/lesson-highlights";
+import { HighlightsPanel } from "@/components/highlights-panel";
 import { SessionMessageNavigation } from "@/components/session-navigation";
 import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
@@ -173,6 +180,9 @@ export function parseProviderKeyRefusal(message: string | undefined): boolean {
 /** useLayoutEffect that is silent during SSR (client components still render on the server in Next). */
 const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
+/** Stable empty default (a fresh [] per render would reset the store's seed). */
+const EMPTY_HIGHLIGHTS: LessonHighlight[] = [];
+
 /** A wake-pipeline steer message: user-role delivery whose metadata marks it
  * as a sub-agent result — rendered as an artifact card, never a bubble. */
 /** The quiet system line (custom-message scheme rendering): centered, muted,
@@ -211,10 +221,13 @@ export function Chat({
 	initiallyCompacting = false,
 	initialConfigured = false,
 	kind = "teach",
+	initialHighlights = EMPTY_HIGHLIGHTS,
 }: {
 	chatId: string;
 	title: string;
 	initialMessages: LhMessage[];
+	/** The lesson's saved highlights (fork feature), from the server record. */
+	initialHighlights?: LessonHighlight[];
 	/** The session kind (practice sessions, owner 2026-10-04): practice
 	 *  renders no phase chip (no probe→teach arc applies) and a Practice
 	 *  tag rides the header instead. */
@@ -244,11 +257,18 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { messages, nativeMessages, contextTokens, send, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { messages, nativeMessages, recordMessages, contextTokens, send, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initiallyInFlight });
 
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
+	// Lesson highlights (fork feature): the store is external, so only the
+	// panel, chip and painter re-render on highlight edits. Only text in the
+	// SAVED record may be highlighted (streaming/unsaved text has no stable id).
+	const transcriptRootRef = useRef<HTMLDivElement | null>(null);
+	const highlightsRowRef = useRef<HTMLDivElement | null>(null);
+	const { store: highlightsStore, nav: highlightsNav } = useLessonHighlights(chatId, initialHighlights);
+	const highlightAnchors = useMemo(() => highlightAnchorsOf(recordMessages), [recordMessages]);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
 
 	// The reattach settled terminal → the sync-and-continue seam (below).
@@ -1277,6 +1297,8 @@ export function Chat({
 							<div className="min-w-4 flex-1" aria-hidden="true" />
 					</>
 					)}
+					{/* Lesson highlights toggle (fork feature): icon + count. */}
+					<HighlightsChip store={highlightsStore} />
 					{/* The plan chip (owner, plan-placement round): session-level
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
@@ -1322,11 +1344,15 @@ export function Chat({
 				</TopBar>
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
-				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
+				{/* The highlights row (fork feature): the session scope + the
+				    highlights panel beside it, below the top bar. The panel sits
+				    OUTSIDE the find scope so Find never walks or observes it. */}
+				<div ref={highlightsRowRef} className="relative flex min-h-0 flex-1">
+				<div ref={sessionFindScopeRef} className="relative flex min-h-0 min-w-0 flex-1">
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
 					<ConversationContent className="min-h-full gap-0 p-0">
-						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
+						<div ref={transcriptRootRef} data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
 									title="New session"
@@ -1441,7 +1467,12 @@ export function Chat({
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
 												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
-												<div className="lh-prose whitespace-pre-wrap text-foreground">
+												<div
+													className="lh-prose whitespace-pre-wrap text-foreground"
+													// Lesson highlights anchor on the text itself, so the
+													// "You" label above never enters a quote.
+													data-hl-anchor={m.id ? userMessageAnchor(m.id) : undefined}
+												>
 													{m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")}
 												</div>
 											</div>
@@ -1482,7 +1513,13 @@ export function Chat({
 														const sourceId = textPartMessageId(part.id);
 														const anchor = sourceId && sourceTextParts.get(sourceId) === part.id ? messageAnchorId(sourceId) : undefined;
 														return (
-															<div key={part.id || pi} id={anchor} data-source-message-id={sourceId ?? undefined} className="lh-source-passage">
+															<div
+																key={part.id || pi}
+																id={anchor}
+																data-source-message-id={sourceId ?? undefined}
+																data-hl-anchor={part.id ? teacherTextAnchor(part.id) : undefined}
+																className="lh-source-passage"
+															>
 																<MessageResponse>{part.text}</MessageResponse>
 															</div>
 														);
@@ -1516,8 +1553,19 @@ export function Chat({
 														// Pending/streaming questions live in the dock, not the
 														// transcript; answered ones render as graded records.
 														if (part.state === "output-available") {
+															// Keyed by its highlight anchor, not position: a plan
+															// block spliced in before it must not remount the card.
+															const cardAnchor =
+																part.sourceMessageId && part.toolCallId
+																	? answeredCardAnchor(part.sourceMessageId, part.toolCallId)
+																	: undefined;
 															return (
-																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} />
+																<AnsweredCard
+																	key={cardAnchor ?? pi}
+																	answer={part.output as QuestionAnswerData}
+																	input={part.input}
+																	anchor={cardAnchor}
+																/>
 															);
 														}
 														return null;
@@ -1695,6 +1743,16 @@ export function Chat({
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
+				<HighlightLayer
+					store={highlightsStore}
+					nav={highlightsNav}
+					rootRef={transcriptRootRef}
+					scopeRef={sessionFindScopeRef}
+					scrollContextRef={scrollContextRef}
+					allowed={highlightAnchors}
+				/>
+				</div>
+				<HighlightsPanel store={highlightsStore} nav={highlightsNav} anchors={highlightAnchors} rowRef={highlightsRowRef} />
 				</div>
 			</div>
 		</div>
@@ -2172,7 +2230,8 @@ function DockOverlay({
 				((t.tagName === "INPUT" && (t as HTMLInputElement).type !== "range") ||
 				t.tagName === "TEXTAREA" ||
 				t.isContentEditable ||
-				t.closest("button"))
+				// role="button": the highlights panel's quotes are div buttons.
+				t.closest("button, [role='button']"))
 			)
 				return;
 			e.preventDefault();

@@ -19,7 +19,18 @@ import { parseAskInput, parseQuizInput } from "@/src/core";
  * client — the card reveals his answer, the committed correct answer, and
  * the explanation, with NO verdict chips (owner ruling 2026-09-27).
  */
-export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; input?: unknown }) {
+export function AnsweredCard({
+	answer,
+	input,
+	anchor,
+}: {
+	answer: QuestionAnswerData;
+	input?: unknown;
+	/** The lesson-highlight anchor key (core/highlights.ts answeredCardAnchor).
+	 *  Only always-visible text is highlightable: the chips, the confidence
+	 *  rail, the tucked "Why" and thinking rows carry data-hl-exclude. */
+	anchor?: string;
+}) {
 	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
 	if (answer.dismissed) {
 		return (
@@ -61,8 +72,12 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 		<div
 			className="rounded-xl border bg-card p-4 text-card-foreground [&>*:last-child]:mb-0"
 			data-testid="answered-card"
+			data-hl-anchor={anchor}
 		>
-			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+			<div
+				data-hl-exclude=""
+				className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+			>
 				{/* The tool's OWN name first (owner 2026-10-09): probe-phase
 			    cards label Probe/Recall — the phase boundary visible in the
 			    transcript. No `tool` on old records: kind labels as before. */}
@@ -169,7 +184,7 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 			    ask never had one, and records from before the feature carry no
 			    field — nothing to show, nothing rendered. */}
 			{isQuiz && answer.confidence != null && (
-				<div className="mt-3 flex items-center gap-3" data-testid="answered-confidence">
+				<div className="mt-3 flex items-center gap-3" data-testid="answered-confidence" data-hl-exclude="">
 					<ConfidenceRail value={answer.confidence} className="min-w-0 flex-1" />
 					<span className="w-9 shrink-0 text-right font-mono text-sm tabular-nums text-muted-foreground">
 						{answer.confidence}%
@@ -203,7 +218,7 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 				   verdict shows, the explanation sits collapsed behind the Why
 				   toggle — viewable, never center stage. Identical to the
 				   prediction pattern it generalizes (owner, 2026-10-03). */
-				<div className="mt-2" data-testid="tucked-explanation">
+				<div className="mt-2" data-testid="tucked-explanation" data-hl-exclude="">
 					<button
 						type="button"
 						onClick={() => setWhyOpen((v) => !v)}
@@ -243,7 +258,8 @@ function SideChatRecord({ answer }: { answer: QuestionAnswerData }) {
 	const exchanges = Array.isArray(answer.clarifications) ? answer.clarifications : [];
 	if (exchanges.length === 0) return null;
 	return (
-		<div className="mt-2" data-testid="answered-clarifications">
+		// Collapsible, so not highlightable (like the tucked "Why").
+		<div className="mt-2" data-testid="answered-clarifications" data-hl-exclude="">
 			<button
 				type="button"
 				onClick={() => setOpen((v) => !v)}

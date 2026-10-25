@@ -72,6 +72,17 @@
 	--lh-mark-ring: rgb(148, 148, 148);
 	--lh-callout-border: #ffffff;
 	--lh-strong-line: #ffffff;
+	/* Lesson highlights (fork feature): translucent tints painted behind
+	   text via ::highlight(), plus solid swatches for the menu and panel. */
+	--lh-hl-yellow: rgb(250 204 21 / 0.3);
+	--lh-hl-green: rgb(74 222 128 / 0.26);
+	--lh-hl-blue: rgb(96 165 250 / 0.3);
+	--lh-hl-pink: rgb(244 114 182 / 0.3);
+	--lh-hl-flash: rgb(255 255 255 / 0.22);
+	--lh-hl-yellow-solid: #facc15;
+	--lh-hl-green-solid: #4ade80;
+	--lh-hl-blue-solid: #60a5fa;
+	--lh-hl-pink-solid: #f472b6;
 }
 
 /* Dark mode (<html class="dark">, the default); mirror the same values so
@@ -111,6 +122,17 @@
 	--lh-mark-ring: rgb(148, 148, 148);
 	--lh-callout-border: #ffffff;
 	--lh-strong-line: #ffffff;
+	/* Lesson highlights (fork feature): translucent tints painted behind
+	   text via ::highlight(), plus solid swatches for the menu and panel. */
+	--lh-hl-yellow: rgb(250 204 21 / 0.3);
+	--lh-hl-green: rgb(74 222 128 / 0.26);
+	--lh-hl-blue: rgb(96 165 250 / 0.3);
+	--lh-hl-pink: rgb(244 114 182 / 0.3);
+	--lh-hl-flash: rgb(255 255 255 / 0.22);
+	--lh-hl-yellow-solid: #facc15;
+	--lh-hl-green-solid: #4ade80;
+	--lh-hl-blue-solid: #60a5fa;
+	--lh-hl-pink-solid: #f472b6;
 }
 
 /* PAPER (<html class="paper">): warm ivory paper, brown-black ink, beige
@@ -144,6 +166,15 @@
 	--lh-mark-ring: #8a3b2c;
 	--lh-callout-border: #8a3b2c;
 	--lh-strong-line: #2b2520;
+	--lh-hl-yellow: rgb(245 200 40 / 0.42);
+	--lh-hl-green: rgb(120 190 80 / 0.32);
+	--lh-hl-blue: rgb(90 150 230 / 0.28);
+	--lh-hl-pink: rgb(230 100 150 / 0.28);
+	--lh-hl-flash: rgb(138 59 44 / 0.22);
+	--lh-hl-yellow-solid: #e9b824;
+	--lh-hl-green-solid: #6ea84a;
+	--lh-hl-blue-solid: #4f86d0;
+	--lh-hl-pink-solid: #d6608f;
 }
 
 .paper ::selection {
@@ -183,6 +214,15 @@
 	--lh-mark-ring: #61afef;
 	--lh-callout-border: #c678dd;
 	--lh-strong-line: #abb2bf;
+	--lh-hl-yellow: rgb(229 192 123 / 0.3);
+	--lh-hl-green: rgb(152 195 121 / 0.28);
+	--lh-hl-blue: rgb(97 175 239 / 0.28);
+	--lh-hl-pink: rgb(198 120 221 / 0.3);
+	--lh-hl-flash: rgb(215 218 224 / 0.2);
+	--lh-hl-yellow-solid: #e5c07b;
+	--lh-hl-green-solid: #98c379;
+	--lh-hl-blue-solid: #61afef;
+	--lh-hl-pink-solid: #c678dd;
 }
 
 .onedark ::selection {

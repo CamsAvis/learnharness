@@ -57,6 +57,14 @@ export interface LhViewPart extends Record<string, unknown> {
 	rawInput?: unknown;
 	errorText?: string;
 	data?: unknown;
+	/** Tool parts: the native assistant message that made the call. */
+	sourceMessageId?: string;
+}
+
+/** A teacher text part's id: `<native message id>-t<text block index>`.
+ *  The one numbering both the view and the highlight anchors use. */
+export function textPartId(messageId: string, textIndex: number): string {
+	return `${messageId}-t${textIndex}`;
 }
 
 /** A view message: user (bubble) or assistant (one continuous run). */
@@ -213,11 +221,15 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 			const streamingMessage = live?.streamingIds.has(m.id) === true;
 			for (const block of assistant.content) {
 				if (block.type === "text") {
-					rest.push({ type: "text", id: `${m.id}-t${textN++}`, text: block.text, state: "done" });
+					rest.push({ type: "text", id: textPartId(m.id, textN++), text: block.text, state: "done" });
 				} else if (block.type === "thinking") {
 					reasoning.push({ type: "reasoning", id: `${m.id}-r${reasoningN++}`, text: block.thinking, state: "done" });
 				} else if (block.type === "toolCall") {
 					const part = toolPartOf(block, live, streamingMessage);
+					// The native message that owns this call: toolCallIds alone are
+					// not unique in legacy records, so highlight anchors on answered
+					// cards key on (message id, call id).
+					part.sourceMessageId = m.id;
 					// The conclusion's reveal join (owner round, 2026-10-05): the
 					// hero of a conclude card is the modelSolution committed at POSE
 					// time — a record fold, enriched here so the card renders pure.

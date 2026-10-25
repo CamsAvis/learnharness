@@ -29,6 +29,8 @@ export default async function ChatPage({
 				// derived app-side (core/view.ts projectView; GET serves the same
 				// native messages).
 				initialMessages={chat.messages}
+			// Lesson highlights (fork feature): private notes, never model-facing.
+			initialHighlights={chat.highlights ?? []}
 			initialConfigured={slotsConfigured(record?.models)}
 			initialPrompt={prompt}
 			// A teacher turn that outlived its client: the remounted view must

@@ -124,6 +124,7 @@ export function useChatSession({ chatId, initialMessages, initiallyInFlight }: U
 	return {
 		messages: state.messages,
 		nativeMessages: state.nativeMessages,
+		recordMessages: state.recordMessages,
 		contextTokens: state.contextTokens,
 		status: state.status,
 		error: state.error,
