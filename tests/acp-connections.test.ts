@@ -10,7 +10,9 @@ import { connectAcp, disconnectAcp, engineForSpec } from "../src/server/acp.ts";
 import { modelCatalog, validateModelsSettings } from "../src/server/model-catalog.ts";
 import { POST, DELETE } from "../app/api/acp/[id]/route.ts";
 import { configureAcpHost } from "./helpers/acp-host.ts";
-import { normalizeContext } from "@earendil-works/pi-ai";
+import { normalizeContext, Type } from "@earendil-works/pi-ai";
+import { existsSync } from "node:fs";
+import { closeAcpSessions } from "../src/agent/acp/engine.ts";
 import { localAcpRequest } from "../src/server/acp-host.ts";
 
 const fixture = path.join(import.meta.dirname, "fixtures", "acp-agent.mjs");
@@ -47,6 +49,42 @@ describe("ACP configuration and billing", () => {
 });
 
 describe("ACP connections and model composition", { concurrency: false }, () => {
+	for (const action of ["disconnect", "recheck"] as const) {
+		it(`${action} releases retained native sessions`, async (test) => {
+			configureAcpHost(test, { claude: config("reuse") });
+			let record: UserSettings = { version: 1, acp: { claude: { enabled: true } } };
+			test.mock.method(stores.settingsStore, "readSettings", () => record);
+			test.mock.method(stores.settingsStore, "writeSettings", (next: unknown) => { record = sanitizeUserSettings(next)!; return record; });
+			test.after(() => closeAcpSessions());
+			const engine = engineForSpec({ provider: "acp-claude", id: "default" });
+			const first = await engine.streamFn(engine.model, normalizeContext({ messages: [{ role: "user", content: "Submit", timestamp: 1 }], tools: [{ name: "submit", description: "Submit", parameters: Type.Object({ value: Type.String() }) }] }), { sessionId: "retained-connection-test" }).result();
+			assert.equal(first.stopReason, "toolUse", first.errorMessage);
+			const native = JSON.parse(first.content.filter((part) => part.type === "text").map((part) => part.text).join(""));
+			if (action === "disconnect") await disconnectAcp("claude");
+			else assert.equal((await connectAcp("claude", {})).ok, true);
+			assert.equal(existsSync(native.cwd), false);
+			assert.throws(() => process.kill(native.pid, 0));
+		});
+	}
+	it("rechecking a connection does not interrupt a currently streaming reply", async (test) => {
+		configureAcpHost(test, { claude: config("hang") });
+		let record: UserSettings = { version: 1, acp: { claude: { enabled: true } } };
+		test.mock.method(stores.settingsStore, "readSettings", () => record);
+		test.mock.method(stores.settingsStore, "writeSettings", (next: unknown) => { record = sanitizeUserSettings(next)!; return record; });
+		test.after(() => closeAcpSessions());
+		const engine = engineForSpec({ provider: "acp-claude", id: "default" });
+		const controller = new AbortController();
+		const stream = engine.streamFn(engine.model, normalizeContext({ messages: [{ role: "user", content: "Wait", timestamp: 1 }] }), { sessionId: "active-check", signal: controller.signal });
+		for await (const event of stream) if (event.type === "text_delta") {
+			const native = JSON.parse(event.delta);
+			try {
+				assert.equal((await connectAcp("claude", {})).ok, true);
+				assert.equal(existsSync(native.cwd), true);
+				assert.doesNotThrow(() => process.kill(native.pid, 0));
+			} finally { controller.abort(); }
+		}
+		assert.equal((await stream.result()).stopReason, "aborted");
+	});
 	it("connects both agents without keys, validates every slot, and disconnects without changing pins", async (test) => {
 		configureAcpHost(test, { codex: config(), claude: config() });
 		let record: UserSettings = { version: 1, general: { autoUpdate: false } };
@@ -66,7 +104,7 @@ describe("ACP connections and model composition", { concurrency: false }, () => 
 			record.models = { strong: pin, cheap: pin, vision: pin };
 			assert.equal(validateModelsSettings(record.models).ok, true);
 			assert.equal(engineForSpec(pin.model).model.api, "acp");
-			disconnectAcp(agent.id);
+			await disconnectAcp(agent.id);
 			assert.throws(() => engineForSpec(pin.model), /disconnected/);
 			assert.equal(modelCatalog().models.some((model) => model.provider === agent.provider), false);
 			assert.equal(record.models.strong?.model?.provider, agent.provider);

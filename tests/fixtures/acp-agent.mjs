@@ -2,13 +2,15 @@
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import crossSpawn from "cross-spawn";
-import { writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 
 const mode = process.argv[2] ?? "text";
+const reuseMode = mode.startsWith("reuse");
+const trace = (event, details = {}) => { if (process.argv[3]) appendFileSync(process.argv[3], `${JSON.stringify({ event, pid: process.pid, cwd: process.cwd(), ...details })}\n`); };
 let session;
 let child;
 let promptId;
-const modelMode = mode.startsWith("models-");
+const modelMode = mode.startsWith("models-") || reuseMode;
 let selectedModel = "alpha";
 let selectedReasoning = "high";
 const selections = [];
@@ -47,6 +49,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 	if (!rpc.method && pendingClient.has(rpc.id)) { pendingClient.get(rpc.id)(rpc.result); pendingClient.delete(rpc.id); return; }
 	try {
 		if (rpc.method === "initialize") {
+			trace("initialize");
 			if (mode === "exit") process.exit(7);
 			if (mode === "malformed") { process.stdout.write("not json\n"); return; }
 			reply(rpc.id, {
@@ -56,7 +59,8 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 			});
 			send({ jsonrpc: "2.0", method: "_auth/status_update", params: { authStatus: { kind: mode === "api-auth" ? "api_key" : "account", label: "Fixture subscription" } } });
 		} else if (rpc.method === "session/new") {
-			if (mode === "codex-history") await nativeThread();
+			trace("session");
+			if (mode === "codex-history" || mode === "reuse-history") await nativeThread();
 			else if (mode !== "codex-no-ephemeral-ack" && process.env.LH_CODEX_EPHEMERAL_ACK) writeFileSync(process.env.LH_CODEX_EPHEMERAL_ACK, JSON.stringify(["fixture"]));
 			if (mode === "auth") { send({ jsonrpc: "2.0", id: rpc.id, error: { code: -32000, message: "Authentication required" } }); return; }
 			session = rpc.params;
@@ -79,6 +83,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 		} else if (rpc.method === "session/prompt") {
 			promptId = rpc.id;
 			const history = rpc.params.prompt.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+			trace("prompt", { replayed: history.includes('"role":"toolResult"') });
 			if (mode === "hang") {
 				child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
 				update("agent_message_chunk", JSON.stringify({ cwd: process.cwd(), pid: process.pid, child: child.pid }));
@@ -95,7 +100,35 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 				send({ jsonrpc: "2.0", id: "permission", method: "session/request_permission", params: { sessionId: "fixture", options: [{ optionId: "allow", kind: "allow_once" }] } });
 				return;
 			}
-			if (modelMode) {
+			if (reuseMode) {
+				const results = [];
+				if (!history.includes('"role":"toolResult"')) {
+					update("agent_message_chunk", JSON.stringify({ pid: process.pid, cwd: process.cwd() }));
+					const mcp = session.mcpServers[0];
+					let sequence = 0;
+					const call = async (value) => {
+						const name = mode === "reuse-question" ? "ask_user_question" : "submit";
+						const args = mode === "reuse-question" ? { question: "What is your current level?", options: [{ label: "Beginner" }, { label: "Experienced" }] } : value === undefined ? { missingRequiredValue: true } : { value };
+						const response = await fetch(mcp.url, { method: "POST", headers: { "content-type": "application/json", ...Object.fromEntries(mcp.headers.map(({ name, value }) => [name, value])) }, body: JSON.stringify({ jsonrpc: "2.0", id: ++sequence, method: "tools/call", params: { name, arguments: args } }) });
+						const reply = await response.json();
+						trace("result", { result: reply.result });
+						return reply.result;
+					};
+					if (mode === "reuse-parallel") results.push(...await Promise.all([call("one"), call("two")]));
+					else {
+						if (mode === "reuse-validation") results.push(await call(undefined));
+						results.push(await call("hello"));
+						if (mode === "reuse-multiple" || mode === "reuse-history") results.push(await call("again"));
+					}
+				}
+				if (mode === "reuse-hang-after-tool" && results.length) {
+					child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+					update("agent_message_chunk", JSON.stringify({ pid: process.pid, cwd: process.cwd(), child: child.pid }));
+					setInterval(() => {}, 1000);
+					return;
+				}
+				update("agent_message_chunk", JSON.stringify({ pid: process.pid, replayed: history.includes('"role":"toolResult"'), results, model: selectedModel, reasoning: selectedReasoning }));
+			} else if (modelMode) {
 				update("agent_message_chunk", JSON.stringify({ model: selectedModel, reasoning: selectedReasoning, selections }));
 			} else if (mode === "tool" || mode === "quiz" || mode === "validation") {
 				const successfulResult = history.includes('"role":"toolResult"') && (mode !== "validation" || history.includes('"isError":false'));
@@ -119,8 +152,8 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 						question: "Which planet is closest to the sun?", options: [{ label: "Venus" }, { label: "Mercury" }], correctAnswer: "Mercury", explanation: "Mercury is closest.", type: "check", nodeId: "planet-order",
 					} : mode === "validation" && !history.includes('"isError":true') ? { missingRequiredValue: true } : { value: "hello" };
 					update("agent_thought_chunk", "Use the app tool.");
-					await request("tools/call", { name, arguments: args });
-					return; // The client owns tool execution and ends this ACP turn.
+					const result = await request("tools/call", { name, arguments: args });
+					if (mode === "validation" && result.result?.isError) await request("tools/call", { name, arguments: { value: "hello" } });
 				}
 				update("agent_message_chunk", "The saved tool result was received.");
 			} else if (mode === "inspect") {

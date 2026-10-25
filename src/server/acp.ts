@@ -2,7 +2,7 @@ import { ACP_AGENTS, acpAgentForProvider, type AcpAgentId, type AcpConnectionCon
 import { acpLaunchConfig, localAcpEnabled } from "./acp-host.ts";
 import { stores } from "./stores.ts";
 import { AcpClient } from "../agent/acp/client.ts";
-import { createAcpEngine } from "../agent/acp/engine.ts";
+import { createAcpEngine, closeAcpSessions, retireAcpSessions } from "../agent/acp/engine.ts";
 import { discoverAcpModels } from "../agent/acp/catalog.ts";
 import { piEngineForSpec, type PiEngine, type ResolvedModelSpec } from "../agent/models.ts";
 
@@ -51,6 +51,7 @@ export async function connectAcp(id: AcpAgentId, body: unknown, signal?: AbortSi
 		if (!initialized.agentCapabilities?.promptCapabilities?.image) throw new Error("Update this adapter: image input is required to use all LearnHarness model slots.");
 		const session = await client.newSession({ mcpServers: [], _meta: { disableBuiltInTools: true, claudeCode: { options: { tools: [], settingSources: [], persistSession: false } } } });
 		const models = await discoverAcpModels(client, session);
+		await retireAcpSessions(id);
 		saveConnection(id, { models, enabled: true });
 		return { ok: true as const, agent: initialized.agentInfo?.name, model: session.models?.currentModelId };
 	} catch (error) {
@@ -61,8 +62,9 @@ export async function connectAcp(id: AcpAgentId, body: unknown, signal?: AbortSi
 	}
 }
 
-export function disconnectAcp(id: AcpAgentId) {
+export async function disconnectAcp(id: AcpAgentId) {
 	const config = settingsStore.readSettings()?.acp?.[id] ?? {};
 	// Disconnect removes availability, never the CLI's own login or existing records.
 	saveConnection(id, { ...config, enabled: false });
+	await closeAcpSessions(id);
 }

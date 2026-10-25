@@ -21,6 +21,6 @@ export async function DELETE(request: Request, context: Context) {
 	const { id } = await context.params;
 	const agent = ACP_AGENTS.find((agent) => agent.id === id);
 	if (!agent) return Response.json({ error: "Unknown ACP agent" }, { status: 404 });
-	disconnectAcp(agent.id);
+	await disconnectAcp(agent.id);
 	return Response.json({ ok: true });
 }

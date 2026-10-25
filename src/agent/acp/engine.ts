@@ -1,15 +1,14 @@
 import {
 	createAssistantMessageEventStream, getCurrentSystemPrompt, getCurrentTools, clampThinkingLevel,
-	type AssistantMessage, type Message, type Model, type Api, type StreamFunction,
-	type TranscriptContext, type ToolCall,
+	type AssistantMessage, type Model, type Api, type StreamFunction,
 } from "@earendil-works/pi-ai";
 import { ACP_AGENTS, ACP_THINKING_LEVELS, type AcpAgentId, type AcpConnectionConfig, type AcpModelInfo } from "../../core/acp.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { PiEngine } from "../models.ts";
-import { AcpClient } from "./client.ts";
-import { createToolBridge } from "./tool-bridge.ts";
-import { selectAcpModel } from "./catalog.ts";
-import { setTimeout, clearTimeout } from "node:timers";
+import { setImmediate } from "node:timers/promises";
+import { acquireAcpSession, closeAcpSessions, type PromptResult } from "./session.ts";
+export { acpPrompt } from "./transcript.ts";
+export { closeAcpSessions, retireAcpSessions } from "./session.ts";
 import type { PiUsageLike } from "../../core/usage.ts";
 
 export function acpModel(id: AcpAgentId, info?: AcpModelInfo): Model<Api> {
@@ -23,12 +22,6 @@ export function acpModel(id: AcpAgentId, info?: AcpModelInfo): Model<Api> {
 		// means unreported, and is omitted from the app's context-limit joins.
 		contextWindow: 0, maxTokens: 0,
 	};
-}
-
-type PromptBlock = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
-interface PromptResult {
-	stopReason?: string;
-	usage?: { inputTokens?: number; outputTokens?: number; cachedReadTokens?: number; cachedWriteTokens?: number; thoughtTokens?: number; totalTokens?: number };
 }
 
 function recordUsage(message: AssistantMessage, result: PromptResult | undefined) {
@@ -49,24 +42,6 @@ function recordUsage(message: AssistantMessage, result: PromptResult | undefined
 	message.usage.totalTokens = message.usage.input + message.usage.output + message.usage.cacheRead + message.usage.cacheWrite;
 }
 
-/** ACP is an agent protocol rather than a completion API. Replay the app's
- * authoritative transcript into a fresh native session each model round.
- * This preserves compaction, steering, model switches, and question pauses
- * without a second, diverging conversation store in the CLI. */
-export function acpPrompt(context: TranscriptContext): PromptBlock[] {
-	const blocks: PromptBlock[] = [{ type: "text", text: "The following is the saved LearnHarness conversation. Continue it as the assistant. Prior tool calls have already run; use their recorded results.\n<conversation-history>" }];
-	for (const message of context.messages) {
-		if (message.role === "system") continue;
-		const content = typeof message.content === "string" ? [{ type: "text" as const, text: message.content }] : message.content;
-		const serialized = content.filter((part) => part.type !== "thinking").map((part) => part.type === "image" ? { type: "image", mimeType: part.mimeType, note: "Image attached below this message" } : part);
-		const details = message.role === "toolResult" ? { toolCallId: message.toolCallId, toolName: message.toolName, isError: message.isError } : {};
-		blocks.push({ type: "text", text: JSON.stringify({ role: message.role, ...details, content: serialized }) });
-		for (const part of content) if (part.type === "image") blocks.push({ type: "image", data: part.data, mimeType: part.mimeType });
-	}
-	blocks.push({ type: "text", text: "</conversation-history>\nContinue from the end. Use the LearnHarness MCP tools for all application actions. Request one tool at a time; LearnHarness will execute it and provide the result in the next round." });
-	return blocks;
-}
-
 function blankMessage(model: Model<Api>): AssistantMessage {
 	const usage: AssistantMessage["usage"] & PiUsageLike = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, lhReportedUsage: {} };
 	return {
@@ -80,14 +55,13 @@ export function createAcpEngine(id: AcpAgentId, config: AcpConnectionConfig, inf
 	const selectedModel = acpModel(id, info);
 	const legacyDefault = info?.modelId === undefined && requestedLevel === "off" && info?.reasoning.off === undefined;
 	const level = requestedLevel === undefined || legacyDefault || !selectedModel.reasoning ? undefined : clampThinkingLevel(selectedModel, requestedLevel);
+	const owner = Symbol("ACP engine");
 	const streamFn: StreamFunction = (model, context, options) => {
 		const stream = createAssistantMessageEventStream();
 		const message = blankMessage(model);
 		void (async () => {
-			let client: AcpClient | undefined;
-			let bridge: Awaited<ReturnType<typeof createToolBridge>> | undefined;
+			let session: Awaited<ReturnType<typeof acquireAcpSession>>["session"] | undefined;
 			let activeBlock: number | undefined;
-			let accepting = true;
 			const endBlock = () => {
 				if (activeBlock === undefined) return;
 				const part = message.content[activeBlock]!;
@@ -98,91 +72,64 @@ export function createAcpEngine(id: AcpAgentId, config: AcpConnectionConfig, inf
 			try {
 				options?.signal?.throwIfAborted();
 				stream.push({ type: "start", partial: message });
-				let toolRequested!: () => void;
-				const toolTurn = new Promise<"tool">((resolve) => { toolRequested = () => resolve("tool"); });
-				const capture = (toolCall: ToolCall) => {
-					if (!accepting) return;
-					accepting = false;
-					endBlock();
-					const index = message.content.length;
-					message.content.push({ ...toolCall, arguments: {} });
-					stream.push({ type: "toolcall_start", contentIndex: index, partial: message });
-					message.content[index] = toolCall;
-					stream.push({ type: "toolcall_delta", contentIndex: index, delta: JSON.stringify(toolCall.arguments), partial: message });
-					stream.push({ type: "toolcall_end", contentIndex: index, toolCall, partial: message });
-					toolRequested();
-				};
 				const tools = getCurrentTools(context.messages);
 				const instructions = `${getCurrentSystemPrompt(context.messages)}\n\nYou are running inside LearnHarness. Use only the provided LearnHarness MCP tools for application actions. Native coding, terminal, and file tools are not needed. The conversation history in the prompt is authoritative.`;
-				client = new AcpClient(id, config, { signal: options?.signal, applicationTools: tools.map((tool) => tool.name), systemPrompt: instructions, onNotification: (method, params) => {
-					if (method !== "session/update" || !accepting) return;
-					const update = params.update as { sessionUpdate?: string; content?: { type?: string; text?: string } } | undefined;
-					if (update?.content?.type !== "text" || typeof update.content.text !== "string") return;
-					const kind = update.sessionUpdate === "agent_message_chunk" ? "text" : update.sessionUpdate === "agent_thought_chunk" ? "thinking" : undefined;
-					if (!kind) return;
-					if (activeBlock === undefined || message.content[activeBlock]?.type !== kind) {
-						endBlock();
-						activeBlock = message.content.length;
-						message.content.push(kind === "text" ? { type: "text", text: "" } : { type: "thinking", thinking: "" });
-						stream.push({ type: kind === "text" ? "text_start" : "thinking_start", contentIndex: activeBlock, partial: message });
+				const signature = JSON.stringify({ id, config, info, level, model: [model.provider, model.id], instructions, tools,
+					native: process.env.CODEX_PATH, home: process.env.CODEX_HOME, claude: process.env.CLAUDE_CONFIG_DIR, profile: process.env.LH_DATA_DIR });
+				const acquired = await acquireAcpSession(options?.sessionId ?? owner, id, signature, context, options?.signal);
+				session = acquired.session;
+				if (acquired.fresh) await session.start(config, info, level, instructions, tools, context);
+				while (true) {
+					const event = await session.next();
+					if (event.type === "text" || event.type === "thinking") {
+						if (activeBlock === undefined || message.content[activeBlock]?.type !== event.type) {
+							endBlock();
+							activeBlock = message.content.length;
+							message.content.push(event.type === "text" ? { type: "text", text: "" } : { type: "thinking", thinking: "" });
+							stream.push({ type: event.type === "text" ? "text_start" : "thinking_start", contentIndex: activeBlock, partial: message });
+						}
+						const part = message.content[activeBlock]!;
+						if (part.type === "text") part.text += event.text;
+						if (part.type === "thinking") part.thinking += event.text;
+						stream.push({ type: event.type === "text" ? "text_delta" : "thinking_delta", contentIndex: activeBlock, delta: event.text, partial: message });
+						continue;
 					}
-					const part = message.content[activeBlock]!;
-					if (part.type === "text") part.text += update.content.text;
-					if (part.type === "thinking") part.thinking += update.content.text;
-					stream.push({ type: kind === "text" ? "text_delta" : "thinking_delta", contentIndex: activeBlock, delta: update.content.text, partial: message });
-				} });
-				const initialized = await client.initialize();
-				if (tools.length && !initialized.agentCapabilities?.mcpCapabilities?.http) throw new Error("This ACP adapter must support HTTP MCP servers. Update the adapter to use LearnHarness tools.");
-				const prompt = acpPrompt(context);
-				if (prompt.some((part) => part.type === "image") && !initialized.agentCapabilities?.promptCapabilities?.image) throw new Error("This ACP adapter does not support image input. Choose an image-capable agent for the Vision slot.");
-				bridge = tools.length ? await createToolBridge(tools, capture) : undefined;
-				const promptCapability = initialized.agentCapabilities?.sessionCapabilities?.systemPrompt;
-				const session = await client.newSession({
-					mcpServers: bridge ? [bridge.mcpServer] : [],
-					...(promptCapability ? { systemPrompt: { mode: promptCapability.mode?.override !== undefined ? "override" : "append", content: [{ type: "text", text: instructions }] } } : {}),
-					_meta: { systemPrompt: instructions, disableBuiltInTools: true, claudeCode: { options: { tools: [], allowedTools: tools.map((tool) => `mcp__learnharness__${tool.name}`), settingSources: [], persistSession: false } } },
-				});
-				await selectAcpModel(client, session, info, level);
-				const completion = client.request<PromptResult>("session/prompt", { sessionId: session.sessionId, prompt }, 10 * 60_000);
-				const result = await Promise.race([
-					toolTurn,
-					completion,
-				]);
-				endBlock();
-				if (result === "tool") {
-					message.stopReason = "toolUse";
-					client.notify("session/cancel", { sessionId: session.sessionId });
-					// Let native cancellation report measured usage before disposal.
-					// An uncooperative adapter cannot hold an application tool hostage.
-					let timer: ReturnType<typeof setTimeout> | undefined;
-					try {
-						const cancelled = await Promise.race([completion.catch(() => undefined), new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), 1500); })]);
-						recordUsage(message, cancelled);
-					} finally { clearTimeout(timer); }
+					endBlock();
+					if (event.type === "tool") {
+						const toolCall = event.pending.call;
+						const index = message.content.length;
+						message.content.push({ ...toolCall, arguments: {} });
+						stream.push({ type: "toolcall_start", contentIndex: index, partial: message });
+						message.content[index] = toolCall;
+						stream.push({ type: "toolcall_delta", contentIndex: index, delta: JSON.stringify(toolCall.arguments), partial: message });
+						stream.push({ type: "toolcall_end", contentIndex: index, toolCall, partial: message });
+						// Let a stop arriving during the handoff cancel before retention.
+						await setImmediate();
+						options?.signal?.throwIfAborted();
+						message.stopReason = "toolUse";
+						await session.park(context, message, event.pending);
+						break;
+					}
+					if (event.type === "complete") {
+						const result = event.result;
+						if (result.stopReason === "cancelled") throw new DOMException("ACP turn cancelled", "AbortError");
+						if (result.stopReason === "max_tokens") message.stopReason = "length";
+						else if (result.stopReason !== "end_turn") throw new Error(`ACP turn did not complete (${result.stopReason ?? "missing stop reason"})`);
+						recordUsage(message, result);
+						await session.close();
+						break;
+					}
 				}
-				else if (result.stopReason === "cancelled") throw new DOMException("ACP turn cancelled", "AbortError");
-				else if (result.stopReason === "max_tokens") message.stopReason = "length";
-				else if (result.stopReason !== "end_turn") throw new Error(`ACP turn did not complete (${result.stopReason ?? "missing stop reason"})`);
-				if (result !== "tool") recordUsage(message, result);
 				options?.signal?.throwIfAborted();
-				accepting = false;
-				await client.close();
-				await bridge?.close();
 				stream.push({ type: "done", reason: message.stopReason as "stop" | "length" | "toolUse", message });
 			} catch (error) {
-				accepting = false;
 				message.stopReason = options?.signal?.aborted || (error instanceof Error && error.name === "AbortError") ? "aborted" : "error";
 				message.errorMessage = error instanceof Error ? error.message : String(error);
-				await client?.close();
-				await bridge?.close();
+				await session?.close();
 				stream.push({ type: "error", reason: message.stopReason, error: message });
-			} finally {
-				await client?.close();
-				await bridge?.close();
-				stream.end();
-			}
+			} finally { stream.end(); }
 		})();
 		return stream;
 	};
-	return { model: selectedModel, level, streamFn };
+	return { model: selectedModel, level, streamFn, closeSession: (sessionId) => closeAcpSessions(id, sessionId ?? owner) };
 }

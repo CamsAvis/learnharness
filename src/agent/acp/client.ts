@@ -56,7 +56,7 @@ export function subscriptionEnv(id: AcpAgentId, source: NodeJS.ProcessEnv = proc
 	return env;
 }
 
-/** ACP v1 is newline-delimited JSON-RPC over stdio. One client per model call.
+/** ACP v1 is newline-delimited JSON-RPC over stdio. One client per native session.
  * Pending RPCs, process trees, and temporary workspaces have one owner here. */
 export class AcpClient {
 	readonly cwd = mkdtempSync(path.join(tmpdir(), "learnharness-acp-"));
@@ -64,7 +64,7 @@ export class AcpClient {
 	private readonly childDone: Promise<void>;
 	private childClosed = false;
 	private readonly lines;
-	private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+	private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> | undefined }>();
 	private nextId = 0;
 	private failure?: Error;
 	private closed = false;
@@ -203,11 +203,13 @@ export class AcpClient {
 		for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(this.failure); }
 		this.pending.clear();
 	}
-	request<T>(method: string, params: unknown, timeoutMs = 60_000): Promise<T> {
+	/** A retained prompt uses null only when its owner manages separate active
+	 * and idle deadlines; ordinary RPCs keep their bounded default. */
+	request<T>(method: string, params: unknown, timeoutMs: number | null = 60_000): Promise<T> {
 		if (this.failure || this.closed) return Promise.reject(this.failure ?? new Error("ACP connection closed"));
 		const id = ++this.nextId;
 		return new Promise<T>((resolve, reject) => {
-			const timer = setTimeout(() => {
+			const timer = timeoutMs === null ? undefined : setTimeout(() => {
 				this.pending.delete(id);
 				reject(new Error(`ACP ${method} timed out. Check the adapter and its subscription sign-in.`));
 			}, timeoutMs);

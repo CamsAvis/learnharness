@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it, type TestContext } from "node:test";
 import { AcpClient } from "../src/agent/acp/client.ts";
+import { createAcpEngine, closeAcpSessions } from "../src/agent/acp/engine.ts";
+import { Type } from "@earendil-works/pi-ai";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { runSubagent } from "../src/agent/subagents/pi-run.ts";
+import { toToolResult } from "../src/agent/tool-execute.ts";
 const { nativeLaunch } = createRequire(import.meta.url)("../src/agent/acp/codex-ephemeral.cjs");
 
-function offlineNative(test: TestContext, ignore = false) {
+function offlineNative(test: TestContext, ignore = false, mode = "codex-history") {
 	const root = mkdtempSync(path.join(tmpdir(), "lh-codex-history-test-"));
 	const native = path.join(root, process.platform === "win32" ? "codex.cmd" : "codex");
 	const fixture = path.join(import.meta.dirname, "fixtures", "codex-history.mjs");
@@ -23,7 +28,7 @@ function offlineNative(test: TestContext, ignore = false) {
 		for (const [key, value] of Object.entries(previous)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
 		if (path.dirname(root) === path.resolve(tmpdir()) && path.basename(root).startsWith("lh-codex-history-test-")) rmSync(root, { recursive: true, force: true });
 	});
-	return { root, config: { command: process.execPath, args: [path.join(import.meta.dirname, "fixtures", "acp-agent.mjs"), "codex-history"] } };
+	return { root, config: { command: process.execPath, args: [path.join(import.meta.dirname, "fixtures", "acp-agent.mjs"), mode] } };
 }
 
 describe("Codex ACP history isolation", { concurrency: false }, () => {
@@ -68,5 +73,30 @@ describe("Codex ACP history isolation", { concurrency: false }, () => {
 			await client.initialize();
 			await assert.rejects(client.newSession({ mcpServers: [] }), /did not confirm an ephemeral session/);
 		} finally { await client.close(); }
+	});
+	it("retains one verified ephemeral Codex session through multiple Pi tool calls without storing chats", async (test) => {
+		const { root, config } = offlineNative(test, false, "reuse-history");
+		test.after(() => closeAcpSessions());
+		const trace = path.join(root, "calls.jsonl");
+		config.args.push(trace);
+		const parameters = Type.Object({ value: Type.String() });
+		const calls: string[] = [];
+		const submit: AgentTool<typeof parameters> = { name: "submit", label: "Submit", description: "Submit", parameters,
+			execute: async (_id, input) => { calls.push(input.value); return toToolResult(`Result ${input.value}`); } };
+		const engine = createAcpEngine("codex", config);
+		const run = await runSubagent([submit], { role: "extractor", engine, systemPrompt: "Use submit.", prompt: "Submit hello", maxTurns: 4 });
+		assert.deepEqual(calls, ["hello", "again"]);
+		assert.equal(JSON.parse(run.text).replayed, false);
+		assert.equal(readFileSync(trace, "utf8").trim().split("\n").filter((line) => JSON.parse(line).event === "session").length, 1);
+		assert.equal(readdirSync(root).some((name) => name.endsWith(".json")), false, "reusing a native session must not persist a Codex chat");
+	});
+	it("a reuse-capable adapter still cannot receive a prompt when Codex ignores ephemeral mode", async (test) => {
+		const { config } = offlineNative(test, true, "reuse-history");
+		const engine = createAcpEngine("codex", config);
+		const { normalizeContext } = await import("@earendil-works/pi-ai");
+		const result = await engine.streamFn(engine.model, normalizeContext({ messages: [{ role: "user", content: "Private lesson history must not be sent", timestamp: 1 }] })).result();
+		assert.equal(result.stopReason, "error");
+		assert.match(result.errorMessage!, /nonpersistent|ephemeral/i);
+		assert.equal(result.content.length, 0);
 	});
 });

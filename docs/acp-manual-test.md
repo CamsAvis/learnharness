@@ -72,6 +72,8 @@ After updating the source, stop the old app terminal and repeat the build and cu
 7. Disconnect a subscription while a background role is pinned to it, then dispatch that role. It should return an explicit failure rather than remain running. Reconnect afterward.
 8. Repeat with Claude after sign-in.
 
+Answer a teaching question while its session is still warm, then repeat after an idle gap longer than ten minutes. Both answers should resume correctly; the latter can rebuild from saved history. Change the model or reasoning while waiting for a question and verify that the next response uses the new selection. Stop a tool-heavy request and verify another input works. Check Codex's sidebar for unwanted replay chats throughout. See [session reuse](acp-session-reuse.md) for lifetime rules and automated/live verification.
+
 These steps make real subscription requests and use your plan allowance. The automated test suite uses offline adapters and makes no inference requests. Report provider, adapter version, chosen model/reasoning and visible errors when reporting a failure.
 
 Verify that no new LearnHarness replay chats appear in the Codex sidebar. Codex rounds require confirmed ephemeral native threads; the lesson remains saved in LearnHarness. Older replay chats created before this fix can be archived in Codex.

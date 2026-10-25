@@ -1,13 +1,18 @@
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
-import type { JsonObject, Tool, ToolCall } from "@earendil-works/pi-ai";
+import type { JsonObject, Tool, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 
-/** A stateless, loopback MCP server. It captures a native tool request and
- * hands it to pi's existing validator/executor; it NEVER executes tools itself.
- * Each model round gets a fresh endpoint and an unguessable bearer token. */
-export async function createToolBridge(tools: Tool[], onCall: (call: ToolCall) => void) {
+export interface PendingAcpTool {
+	call: ToolCall;
+	complete(result: ToolResultMessage): void;
+	cancel(): void;
+}
+
+/** Hold native MCP requests until Pi validates/executes them. No application
+ * tool executes here. A retained native session owns one bearer and endpoint. */
+export async function createToolBridge(tools: Tool[], onCall: (pending: PendingAcpTool) => void, onAbandon: () => void) {
 	const token = randomBytes(32).toString("hex");
-	let captured = false;
+	const pending = new Set<PendingAcpTool>();
 	const byName = new Map(tools.map((tool) => [tool.name, tool]));
 	const server = createServer(async (request, response) => {
 		if (request.url !== "/mcp" || request.headers.authorization !== `Bearer ${token}` || request.headers.origin) {
@@ -44,12 +49,28 @@ export async function createToolBridge(tools: Tool[], onCall: (call: ToolCall) =
 					const args = rpc.params?.arguments ?? {};
 					if (!name || !byName.has(name)) { error = { code: -32602, message: "Unknown LearnHarness tool" }; break; }
 					if (!args || typeof args !== "object" || Array.isArray(args)) { error = { code: -32602, message: "Tool arguments must be an object" }; break; }
-					result = { isError: true, content: [{ type: "text", text: "Handed off to LearnHarness. This agent turn ends here; the application will validate, execute, and return the result." }] };
-					if (!captured) {
-						captured = true;
-						onCall({ type: "toolCall", id: `acp_${randomUUID()}`, name, arguments: args as JsonObject });
-					}
-					break;
+					let settled = false;
+					const finish = (value: unknown) => {
+						if (settled) return;
+						settled = true;
+						pending.delete(call);
+						response.writeHead(200, { "Content-Type": "application/json" });
+						response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: value }));
+					};
+					const call: PendingAcpTool = {
+						call: { type: "toolCall", id: `acp_${randomUUID()}`, name, arguments: args as JsonObject },
+						complete: (message) => finish({ content: message.content, isError: message.isError }),
+						cancel: () => finish({ isError: true, content: [{ type: "text", text: "LearnHarness ended this native session." }] }),
+					};
+					pending.add(call);
+					response.once("close", () => {
+						if (settled) return;
+						settled = true;
+						pending.delete(call);
+						onAbandon();
+					});
+					onCall(call);
+					return;
 				}
 				default: error = { code: -32601, message: "MCP method not supported" };
 			}
@@ -68,6 +89,10 @@ export async function createToolBridge(tools: Tool[], onCall: (call: ToolCall) =
 	if (!address || typeof address === "string") throw new Error("Could not open ACP tool bridge");
 	return {
 		mcpServer: { type: "http", name: "learnharness", url: `http://127.0.0.1:${address.port}/mcp`, headers: [{ name: "Authorization", value: `Bearer ${token}` }] },
-		close: () => new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }),
+		close: () => new Promise<void>((resolve) => {
+			for (const call of pending) call.cancel();
+			server.close(() => resolve());
+			server.closeAllConnections();
+		}),
 	};
 }
