@@ -14,7 +14,7 @@ import { LatexGlyph } from "../components/latex-glyph.tsx";
 import { ProblemCard, ConcludeCard } from "../components/practice-cards.tsx";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
 import {
-	repairMathForDisplay, healOverescapedCommands, restoreMathEscapes,
+	repairMathForDisplay, healOverescapedCommands, restoreMathEscapes, restoreDoublyEscapedText,
 	parseQuizInput, parseAskInput, parseExplainInput, activeProblemOf, projectView,
 	toLlmMessages, type LhMessage, type ArtifactPartProps,
 } from "../src/core/index.ts";
@@ -248,5 +248,78 @@ describe("practice display surfaces", () => {
 		assertMath(revealHtml, [tex, tex]);
 		assert.deepEqual(concluded, before);
 		assert.deepEqual(toLlmMessages(concluded), history);
+	});
+});
+
+// Plain strings below, so every backslash is explicit: "\\" is ONE backslash,
+// "\\\\" is two, "\\n" is the two characters backslash + n, "\n" is a real newline.
+describe("repairMathForDisplay — doubly-escaped text (literal backslash-n)", () => {
+	// The field case (2026-10-25, Opus via the Claude Code ACP adapter), as
+	// saved: literal \n pairs, no real newline, doubled LaTeX backslashes.
+	const saved =
+		"A tilted capsule has its center at $C = (100,\\\\ 50,\\\\ 0)$ in world space. Its own local axes point in these world directions:" +
+		"\\n\\n- local $X$ → $\\\\hat{u} = (0.6,\\\\ 0.8,\\\\ 0)$" +
+		"\\n- local $Y$ → $\\\\hat{v} = (-0.8,\\\\ 0.6,\\\\ 0)$" +
+		"\\n- local $Z$ → $\\\\hat{w} = (0,\\\\ 0,\\\\ 1)$" +
+		"\\n\\nWhat is the point's **world** position? Explain how you got it.";
+	const intended =
+		"A tilted capsule has its center at $C = (100,\\ 50,\\ 0)$ in world space. Its own local axes point in these world directions:" +
+		"\n\n- local $X$ → $\\hat{u} = (0.6,\\ 0.8,\\ 0)$" +
+		"\n- local $Y$ → $\\hat{v} = (-0.8,\\ 0.6,\\ 0)$" +
+		"\n- local $Z$ → $\\hat{w} = (0,\\ 0,\\ 1)$" +
+		"\n\nWhat is the point's **world** position? Explain how you got it.";
+
+	it("the fixture really is doubly escaped", () => {
+		assert.ok(!saved.includes("\n"), "no real newline");
+		assert.equal(saved.split("\\n").length - 1, 6, "six literal backslash-n pairs");
+		assert.ok(saved.includes("(100,\\\\ 50"), "two backslashes before the space");
+	});
+
+	it("restores the intended text byte for byte", () => {
+		assert.equal(repairMathForDisplay(saved), intended);
+	});
+
+	it("renders a real list and unbroken coordinates, with no literal backslash-n left", () => {
+		const html = renderToStaticMarkup(<MessageResponse>{repairMathForDisplay(saved)}</MessageResponse>);
+		const { document } = parseHTML(html);
+		assert.equal(document.querySelectorAll("li").length, 3, "three list items");
+		assert.ok(!html.includes("\\n"), "no literal backslash-n in the output");
+		const rendered = math(html);
+		assert.equal(rendered.errors, 0);
+		assert.ok(rendered.annotations.includes("C = (100,\\ 50,\\ 0)"), "control spaces, not row breaks");
+		assert.ok(rendered.annotations.includes("\\hat{u} = (0.6,\\ 0.8,\\ 0)"));
+	});
+
+	it("teaching recall/explain questions get it without mutating the saved input", () => {
+		const explain = { question: saved, correctAnswer: "$P = C + 10\\hat{u} + 5\\hat{v} + 20\\hat{w}$" };
+		const before = structuredClone(explain);
+		assert.equal(parseExplainInput(explain)?.question, intended);
+		assert.deepEqual(explain, before);
+	});
+
+	it("halves even runs exactly: a doubled row break (4) becomes a row break (2)", () => {
+		assert.equal(restoreDoublyEscapedText("Rows:\\n\\n$a \\\\\\\\ b$"), "Rows:\n\n$a \\\\ b$");
+	});
+
+	it("leaves text alone without a literal paragraph break or list line", () => {
+		const unchanged = [
+			"What does \\n do in printf?", // a lone \n may be meant literally
+			"Line one\nthen \\n\\n stays", // real newlines: authored as-is
+			"$a \\\\ 2$ and $b \\\\ 3$", // inline row breaks, no \n at all
+			"Use `printf(\"\\n\\n\")` here", // only inside code
+			intended, // already clean
+		];
+		for (const s of unchanged) assert.equal(restoreDoublyEscapedText(s), s, s);
+	});
+
+	it("with evidence, code spans, environments and odd runs keep their bytes", () => {
+		const s =
+			"Intro\\n\\n`printf(\"\\n\")` and $\\begin{pmatrix} a \\\\ b \\end{pmatrix}$ and $x \\\\\\ y$\\n- item";
+		const out = restoreDoublyEscapedText(s);
+		assert.ok(out.startsWith("Intro\n\n`"), "prose newlines restored");
+		assert.ok(out.includes("`printf(\"\\n\")`"), "code span untouched");
+		assert.ok(out.includes("$\\begin{pmatrix} a \\\\ b \\end{pmatrix}$"), "environment row breaks kept");
+		assert.ok(out.includes("$x \\\\\\ y$"), "odd backslash run kept");
+		assert.ok(out.endsWith("\n- item"));
 	});
 });

@@ -327,7 +327,7 @@ const DISPLAY_DEBRIS_RE = /[\b\t\v\f\r]/;
 
 /** Shared display-only repair. Keep raw arguments and model history unchanged. */
 export function repairMathForDisplay(text: string): string {
-	return healOverescapedCommands(restoreMathEscapes(text));
+	return restoreDoublyEscapedText(healOverescapedCommands(restoreMathEscapes(text)));
 }
 
 export function restoreMathEscapes(text: string): string {
@@ -513,14 +513,38 @@ function halveOverescapedCommandRuns(inner: string): string {
 
 export function healOverescapedCommands(text: string): string {
 	if (!text.includes("\\\\")) return text;
+	return rewriteMathAndProse(text, {
+		prose: (segment) => segment,
+		math: (inner) => halveOverescapedCommandRuns(inner),
+	});
+}
+
+/** One scan shared by the display heals: code fences and code spans are
+ *  copied untouched; balanced math spans (legacy `\(…\)`/`\[…\]` and dollar
+ *  `$…$`/`$$…$$`) go through `math` with whether they are display spans;
+ *  everything else is prose, handed to `prose` in maximal runs. Unbalanced
+ *  delimiters stay prose, exactly as before. */
+interface MathAndProseRewrite {
+	prose: (segment: string) => string;
+	math: (inner: string, isDisplay: boolean) => string;
+}
+
+function rewriteMathAndProse(text: string, rewrite: MathAndProseRewrite): string {
 	const out: string[] = [];
+	let prose = "";
+	const flush = () => {
+		if (prose) out.push(rewrite.prose(prose));
+		prose = "";
+	};
 	let i = 0;
 	while (i < text.length) {
 		if (atLineStart(text, i) && FENCE_OPEN_RE.test(text.slice(i))) {
+			flush();
 			i = copyFencedBlock(text, i, out);
 			continue;
 		}
 		if (text[i] === "`") {
+			flush();
 			const run = backtickRun(text, i);
 			let j = i + run;
 			while (j < text.length) {
@@ -541,8 +565,9 @@ export function healOverescapedCommands(text: string): string {
 				const close = isDisplay ? DISPLAY_CLOSE : INLINE_CLOSE;
 				const closeAt = findClose(text, i + open.length, close);
 				if (closeAt !== -1) {
+					flush();
 					const inner = text.slice(i + open.length, closeAt);
-					out.push(open + halveOverescapedCommandRuns(inner) + close);
+					out.push(open + rewrite.math(inner, isDisplay) + close);
 					i = closeAt + close.length;
 					continue;
 				}
@@ -553,20 +578,71 @@ export function healOverescapedCommands(text: string): string {
 			const isDisplay = dollarIsDisplay(text, i, size);
 			const close = findDollarClose(text, i + size, size, isDisplay);
 			if (close) {
+				flush();
 				out.push(
 					text.slice(i, i + size) +
-					halveOverescapedCommandRuns(text.slice(i + size, close.at)) +
+					rewrite.math(text.slice(i + size, close.at), isDisplay) +
 					text.slice(close.at, close.after),
-			);
+				);
 				i = close.after;
 				continue;
 			}
-			out.push(text.slice(i, i + size));
+			prose += text.slice(i, i + size);
 			i += size;
 			continue;
 		}
-		out.push(text[i]!);
+		prose += text[i]!;
 		i += 1;
 	}
+	flush();
 	return out.join("");
+}
+
+/**
+ * Doubly-escaped text heal (2026-10-25) — the literal "\n" fix.
+ *
+ * Some tool-call arguments arrive escaped one level too deep as a WHOLE:
+ * the saved string holds the two characters `\` `n` wherever a line break
+ * was meant, and `\\` wherever LaTeX meant `\`. Field evidence (2026-10-25,
+ * real data): Opus via the Claude Code ACP adapter wrote a recall question
+ * with eight literal `\n` pairs, no real newline, `\\hat{u}` and
+ * `(100,\\ 50,\\ 0)`. The learner saw "\n\n" in the prose, and the
+ * coordinates broke across lines (KaTeX reads `\\` as a line break).
+ *
+ * healOverescapedCommands already halves doubled COMMANDS inside math. This
+ * pass covers the two remaining forms, and only on strong evidence that the
+ * whole string was doubly escaped: it has NO real newline, yet its prose
+ * holds a literal paragraph break (`\n\n`) or list line (`\n- `, `\n* `,
+ * `\n1. `). A lone `\n` in prose ("what does \n do in printf?") is not
+ * evidence: in a programming lesson it is often meant literally. Then:
+ *  - in prose (outside math and code), every unescaped `\n` becomes a real
+ *    newline;
+ *  - in INLINE math without an environment (no `begin{`), an even
+ *    backslash run before a space (the doubled control space `\ `) is
+ *    halved.
+ * Without that evidence the text is returned unchanged, so authored inline
+ * row breaks like `$a \\ 2$`, multi-line text, and `\n` inside code keep
+ * their meaning. Display only: raw arguments and model history stay as sent.
+ */
+const LITERAL_NEWLINE_SIGNAL = /(?<!\\)\\n(?:\\n|[-*] |\d+[.)] )/;
+const LITERAL_NEWLINE = /(?<!\\)\\n/g;
+
+export function restoreDoublyEscapedText(text: string): string {
+	if (text.includes("\n") || !text.includes("\\n")) return text;
+	let signal = false;
+	rewriteMathAndProse(text, {
+		prose: (segment) => {
+			if (LITERAL_NEWLINE_SIGNAL.test(segment)) signal = true;
+			return segment;
+		},
+		math: (inner) => inner,
+	});
+	if (!signal) return text;
+	return rewriteMathAndProse(text, {
+		prose: (segment) => segment.replace(LITERAL_NEWLINE, "\n"),
+		math: (inner, isDisplay) =>
+			isDisplay || inner.includes("begin{")
+				? inner
+				: inner.replace(/(\\+)(?= )/g, (run: string) => (run.length % 2 === 0 ? "\\".repeat(run.length / 2) : run)),
+	});
 }
