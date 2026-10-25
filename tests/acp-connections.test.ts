@@ -3,7 +3,8 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { ACP_AGENTS, parseAcpConfig } from "../src/core/acp.ts";
 import { sanitizeUserSettings, type UserSettings } from "../src/core/settings.ts";
-import { callCost, sessionCost } from "../src/core/prices.ts";
+import { subscriptionLabel } from "../src/core/prices.ts";
+import { callCost, sessionCost } from "../src/server/pricing.ts";
 import { stores } from "../src/server/stores.ts";
 import { connectAcp, disconnectAcp, engineForSpec } from "../src/server/acp.ts";
 import { modelCatalog, validateModelsSettings } from "../src/server/model-catalog.ts";
@@ -27,11 +28,21 @@ describe("ACP configuration and billing", () => {
 		assert.deepEqual(sanitizeUserSettings({ acp: "broken" })?.acp, {});
 	});
 	it("subscription calls are excluded from API charges and can coexist with priced API turns", () => {
-		assert.equal(callCost({}, "acp-codex:default"), 0);
-		assert.equal(callCost({ inputTokens: 1_000_000, outputTokens: 1_000_000 }, "acp-claude:default"), 0);
+		assert.equal(callCost({}, "acp-codex:default"), null);
+		assert.equal(callCost({ inputTokens: 1_000_000, outputTokens: 1_000_000 }, "acp-claude:default"), null);
 		assert.equal(callCost({}, "unknown:default"), null);
 		const summary = sessionCost({ turns: [{ id: "sub", messageId: "m", at: "now", model: "acp-codex:default", steps: [{ inputTokens: undefined, outputTokens: undefined, cacheReadTokens: undefined, cacheWriteTokens: undefined, reasoningTokens: undefined }] }] });
-		assert.deepEqual(summary, { cost: 0, unpriced: 0 });
+		assert.deepEqual(summary, { cost: 0, unpriced: 0, subscription: 1, subscriptionProviders: ["Codex"], turnCosts: { sub: null } });
+		assert.equal(subscriptionLabel("acp-claude:default"), "Claude Code");
+		const apiCall = { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
+		const mixed = sessionCost({ turns: [
+			{ id: "api", messageId: "a", at: "now", model: "openai:gpt-5", steps: [apiCall] },
+			{ id: "claude", messageId: "c", at: "now", model: "acp-claude:default", steps: [apiCall] },
+		] });
+		assert.ok(mixed.cost > 0);
+		assert.equal(mixed.cost, callCost(apiCall, "openai:gpt-5"));
+		assert.equal(mixed.unpriced, 0);
+		assert.deepEqual(mixed.subscriptionProviders, ["Claude Code"]);
 	});
 });
 

@@ -19,7 +19,7 @@ describe("subscription-only setup and display", () => {
 	});
 	it("shows subscription billing instead of a fictitious API token price", () => {
 		const html = renderToStaticMarkup(<StatsBar turns={[{ id: "t", messageId: "m", at: "now", model: "acp-codex:default", steps: [{ inputTokens: 1000, outputTokens: 10, cacheReadTokens: undefined, cacheWriteTokens: undefined, reasoningTokens: undefined }] }]} />);
-		assert.match(html, /data-testid="stats-cost">Subscription</);
+		assert.match(html, /data-testid="stats-cost">Codex</);
 		assert.doesNotMatch(html, /\$0\.0000/);
 	});
 	it("both connection forms explain native sign-in and local adapter configuration", () => {

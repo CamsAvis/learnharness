@@ -22,6 +22,25 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
 import { acpModel } from "../agent/acp/engine.ts";
 import { ACP_AGENTS, acpAgentForProvider } from "../core/acp.ts";
+import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
+import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
+import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
+
+export async function refreshConnectionCatalog(provider?: string): Promise<void> {
+	await Promise.all([
+		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
+		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
+	]);
+}
+function connectionModel(provider: string, id: string): Model<Api> | undefined {
+	const agent = acpAgentForProvider(provider);
+	if (agent) {
+		const info = settingsStore.readSettings()?.acp?.[agent.id]?.models?.find((model) => model.id === id);
+		return info || id === "default" ? acpModel(agent.id, info) : undefined;
+	}
+	return provider === "chatgpt" ? chatGPTModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
+}
+function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId), ...ACP_AGENTS.map((agent) => agent.provider)]; }
 import { settingsStore } from "../store/settings.ts";
 import { effectiveSettings } from "./stores.ts";
 import { keyValue } from "./keys.ts";
@@ -129,22 +148,15 @@ export function catalogProviders(): CatalogProvider[] {
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
 	}));
+	keyed.push(
+		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
+		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
+	);
 	const connections = settingsStore.readSettings()?.acp;
 	for (const agent of ACP_AGENTS) {
 		if (localAcpEnabled() && connections?.[agent.id]?.enabled) keyed.push({ id: agent.provider, envVar: "", keyPresent: false, connectionReady: true, billing: "subscription" });
 	}
 	return keyed.sort((a, b) => a.id.localeCompare(b.id));
-}
-
-function catalogModel(provider: string, id: string): Model<Api> | undefined {
-	const agent = acpAgentForProvider(provider);
-	if (!agent) return piModels().getModel(provider, id);
-	const info = settingsStore.readSettings()?.acp?.[agent.id]?.models?.find((model) => model.id === id);
-	return info || id === "default" ? acpModel(agent.id, info) : undefined;
-}
-
-function catalogProviderIds(): string[] {
-	return [...piModels().getProviders().map((provider) => provider.id), ...ACP_AGENTS.map((agent) => agent.provider)];
 }
 
 /** The providers whose key is present — the picker federates exactly
@@ -191,6 +203,7 @@ export function catalogContextLimits(): Map<string, number> {
 			index.set(`${provider.id}:${model.id}`, model.contextWindow);
 		}
 	}
+	for (const model of [...chatGPTModels(), ...nativeSubscriptionModels()]) index.set(`${model.provider}:${model.id}`, model.contextWindow);
 	return index;
 }
 
@@ -207,6 +220,8 @@ export function modelCatalog(): ModelCatalogResponse {
 		.flatMap((p) => piModels().getModels(p.id));
 	const models = [
 		...nativeModels,
+		...chatGPTModels(),
+		...nativeSubscriptionModels(),
 		...ACP_AGENTS.filter((agent) => localAcpEnabled() && connections?.[agent.id]?.enabled).flatMap((agent) => {
 			const models = connections?.[agent.id]?.models;
 			return models?.length ? models.map((model) => acpModel(agent.id, model)) : [acpModel(agent.id)];
@@ -235,13 +250,13 @@ export type SettingsValidation =
  *    the model the picker writes against (settings.model, else config's
  *    prober/teacher pin; one controller, so the two specs share it). */
 export function validateChatSettings(settings: ChatSettings): SettingsValidation {
-	const providers = catalogProviderIds();
+	const providers = connectionProviderIds();
 	if (settings.model) {
 		const { provider, id } = settings.model;
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}
-		if (!catalogModel(provider, id)) {
+		if (!connectionModel(provider, id)) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
@@ -265,13 +280,13 @@ export function validateModelsSettings(settings: ModelsSettings): SettingsValida
 }
 
 function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: string; id: string }; thinkingLevel?: ThinkingLevel }): SettingsValidation {
-	const providers = catalogProviderIds();
+	const providers = connectionProviderIds();
 	if (slot.model) {
 		const { provider, id } = slot.model;
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}
-		if (!catalogModel(provider, id)) {
+		if (!connectionModel(provider, id)) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
@@ -293,7 +308,7 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
  *  or the level already supported — the existence gate rejects unknown
  *  models separately, so this only ever sees real ones in practice). */
 function clampLevelFor(provider: string, id: string, level: ThinkingLevel): ThinkingLevel | undefined {
-	const model = catalogModel(provider, id);
+	const model = connectionModel(provider, id);
 	if (model?.api === "acp" && id === "default" && level === "off" && model.thinkingLevelMap?.off === null) return undefined;
 	if (model?.api === "acp" && !model.reasoning) return undefined;
 	return model ? clampThinkingLevel(model, level) : level;

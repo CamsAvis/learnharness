@@ -33,10 +33,6 @@ export function acpAgentForProvider(provider: string) {
 	return ACP_AGENTS.find((agent) => agent.provider === provider);
 }
 
-export function isSubscriptionModel(qualifiedModel: string): boolean {
-	return ACP_AGENTS.some((agent) => qualifiedModel.startsWith(`${agent.provider}:`));
-}
-
 /** Validate trusted host configuration and sanitize legacy disk records. */
 export function parseAcpConfig(value: unknown):
 	| { ok: true; config: AcpConnectionConfig }

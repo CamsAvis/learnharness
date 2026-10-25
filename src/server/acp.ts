@@ -17,10 +17,12 @@ export function acpConnections(): AcpConnectionStatus[] {
 	} : { enabled: false } }));
 }
 
+type Tail<T extends unknown[]> = T extends [unknown, ...infer R] ? R : never;
+
 /** The server resolves process configuration; the agent layer never reads stores. */
-export function engineForSpec(spec: ResolvedModelSpec): PiEngine {
+export function engineForSpec(spec: ResolvedModelSpec, ...options: Tail<Parameters<typeof piEngineForSpec>>): PiEngine {
 	const agent = acpAgentForProvider(spec.provider);
-	if (!agent) return piEngineForSpec(spec);
+	if (!agent) return piEngineForSpec(spec, ...options);
 	if (!localAcpEnabled()) throw new AcpConnectionUnavailable("ACP requires the local app launcher. Run npm run app on this computer.");
 	const config = settingsStore.readSettings()?.acp?.[agent.id];
 	if (!config?.enabled) throw new AcpConnectionUnavailable(`${agent.label} is disconnected. Connect it in Settings → Subscriptions.`);

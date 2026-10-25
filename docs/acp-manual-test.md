@@ -41,7 +41,7 @@ Desktop applications can inherit a different PATH from a terminal. If an install
 
 1. Sign in with your subscription through `codex login` or `claude auth login`.
 2. Open **Settings → Subscriptions** and click **Connect** for the desired agent. This checks account sign-in and discovers models/reasoning options without inference.
-3. In **Models**, choose a connected subscription model for Strong, Cheap and Vision. One subscription can fill all three.
+3. In **Settings → Agent → Models**, choose a connected subscription model for Strong, Cheap and Vision. One subscription can fill all three.
 4. The existing picker below the composer chooses the session's model. The adjacent thinking picker selects supported reasoning effort. **Agent default** delegates to the adapter, unless an existing Strong-slot reasoning setting is inherited.
 5. Reconnect after an adapter update, changed subscription, or changed model access to refresh the advertised choices.
 
@@ -57,10 +57,14 @@ node 'C:\path\to\node_modules\@anthropic-ai\claude-code\cli-wrapper.cjs' auth lo
 
 Complete subscription sign-in yourself, then connect Claude in Settings.
 
+If Claude still fails, distinguish **Connect** from a message failure. Start the app with `npm run app`, check the adapter path under **Settings → Subscriptions → Claude Code → Adapter location**, and use **Check connection** after changing sign-in or upgrading the adapter. Restart the app after editing the host file. Existing chats keep their own model; choose Claude in the picker below the composer even if the Strong default has changed.
+
+After updating the source, stop the old app terminal and repeat the build and curation commands above. Restarting an old standalone build does not load source changes. Report the visible error and whether it occurs on Connect or after sending a message; never include credential files or tokens.
+
 ## Acceptance exercise
 
 1. Start a lesson, such as “Teach me how transformers work.”
-2. Choose a named Codex model and reasoning level using the composer controls. Submit a prompt; verify the response, selected model and **Subscription** billing label.
+2. Choose a named Codex model and reasoning level using the composer controls. Submit a prompt; verify the response, selected model and **Codex** subscription cost label (**Claude Code** for Claude). Subscription turns must not acquire an API dollar estimate.
 3. Answer a teaching question. Check that the lesson resumes and the answer survives a page refresh.
 4. Change model/reasoning and send another turn. Verify the choices persist after reopening.
 5. Stop an active turn; verify activity clears and another input works.

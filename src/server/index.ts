@@ -45,3 +45,4 @@ export * from "./observability.ts";
 export * from "./model-catalog.ts";
 export * from "./acp.ts";
 export { localAcpRequest } from "./acp-host.ts";
+export { sessionCost } from "./pricing.ts";

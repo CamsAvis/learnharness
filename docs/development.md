@@ -31,7 +31,6 @@ npm run desktop:dist   # local signed/notarized macOS arm64 build (LH_NOTARY key
 npx tsx --env-file=.env.local scripts/import-notes.ts <dir>   # bulk-import notes → graph
 npx tsx --env-file=.env.local scripts/backfill-graph.ts       # wipe + re-extract every chat
 npx tsx --env-file=.env.local scripts/replay-layout.ts        # re-derive layout from the ledgers
-npx tsx scripts/sync-pricing.ts                               # regenerate core/prices.ts tables
 ```
 
 For the Windows build/start commands, persistent ACP profile and local adapter paths, see [open the local app](acp-manual-test.md). Both `npm test` and `npm run desktop:dev` use Node launchers rather than shell-specific environment assignment.
@@ -149,13 +148,17 @@ src/
 electron/                       desktop launcher + security guard (spawns the standalone
                                 server; 1 IPC channel; LH_DATA_DIR + BYOK env)
 scripts/                        build-server.mjs (packaging guards), import-notes,
-                                backfill-graph, replay-layout, sync-pricing
+                                backfill-graph, replay-layout
 data/                           chats/ · graph/ (nodes/chains/sessions/coverage
                                 ledgers + positions/sources/render-settings maps) ·
                                 jobs/ · settings.json — runtime state, git-ignored
 ```
 
 ## Key mechanisms
+
+See [compaction and accounting](compaction-accounting.md) for the local Pi cutoff port,
+measurement-only context meter, and server-side current-catalog pricing. There is no
+pricing-generation step: Pi AI's catalog and public calculator are the authority.
 
 **Client-side question tools.** `quiz` and `ask_user_question` have no server `execute`: the tool call streams to the browser, the learner answers in the dock, the client grades via `question-core` and returns the verdict with `addToolOutput` — which fires the SDK continuation so the teacher resumes mid-turn. Options are shuffled deterministically (seeded by toolCallId) so server and client renders match. A pending quiz persisted in the chat record is exactly what makes **resume mid-question free**.
 

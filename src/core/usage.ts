@@ -8,6 +8,7 @@ export interface PiUsageLike {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cacheWrite1h?: number;
 	reasoning?: number;
 	lhReportedUsage?: Partial<CallUsage>;
 }
@@ -19,12 +20,14 @@ export function usageToCallUsage(usage: PiUsageLike): CallUsage {
 		outputTokens: reported.outputTokens,
 		cacheReadTokens: reported.cacheReadTokens,
 		cacheWriteTokens: reported.cacheWriteTokens,
+		cacheWrite1hTokens: reported.cacheWrite1hTokens,
 		reasoningTokens: reported.reasoningTokens,
 	} : {
 		inputTokens: usage.input,
 		outputTokens: usage.output,
 		cacheReadTokens: usage.cacheRead,
 		cacheWriteTokens: usage.cacheWrite,
+		cacheWrite1hTokens: usage.cacheWrite1h ?? 0,
 		reasoningTokens: usage.reasoning ?? 0,
 	};
 }
