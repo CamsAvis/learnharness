@@ -1,0 +1,3 @@
+# These files run on Linux. Keep LF line endings even on Windows checkouts
+# (core.autocrlf would otherwise convert them to CRLF and break bash/systemd).
+* text eol=lf
