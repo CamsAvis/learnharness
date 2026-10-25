@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { Type, normalizeContext, type AssistantMessageEvent, type Message } from "@earendil-works/pi-ai";
@@ -12,6 +12,7 @@ import { toToolResult } from "../src/agent/tool-execute.ts";
 import type { AcpAgentId } from "../src/core/acp.ts";
 import { usageToCallUsage } from "../src/core/usage.ts";
 import { piUsageToStep, accumulateJobUsage } from "../src/core/contracts/jobs.ts";
+import { assertProcessStopped } from "./helpers/process-stopped.ts";
 
 const fixture = path.join(import.meta.dirname, "fixtures", "acp-agent.mjs");
 const config = (mode = "text") => ({ command: process.execPath, args: [fixture, mode] });
@@ -115,14 +116,14 @@ describe("ACP engine over real subprocess stdio", () => {
 		assert.ok(inspected);
 		// Cleanup is awaited before the stream iterator ends.
 		assert.equal(existsSync(inspected.cwd), false);
-		for (const pid of [inspected.pid, inspected.child]) assert.throws(() => process.kill(pid, 0));
+		for (const pid of [inspected.pid, inspected.child]) await assertProcessStopped(pid);
 	});
 	it("an already-aborted request never starts an adapter", async () => {
 		const controller = new AbortController(); controller.abort();
 		const engine = createAcpEngine("codex", { command: "does-not-exist-acp" });
 		assert.equal((await engine.streamFn(engine.model, context(), { signal: controller.signal }).result()).stopReason, "aborted");
 	});
-	it("retains ownership of descendants after the adapter exits", async (test) => {
+	it("retains ownership of descendants after the adapter exits", async () => {
 		let descendant: number | undefined;
 		const client = new AcpClient("codex", config("orphan"), { onNotification: (_method, params) => {
 			const update = params.update as { content?: { text?: string } };
@@ -133,14 +134,11 @@ describe("ACP engine over real subprocess stdio", () => {
 			const session = await client.newSession({ mcpServers: [] });
 			await assert.rejects(client.request("session/prompt", { sessionId: session.sessionId, prompt: [] }), /exited/);
 			await new Promise((resolve) => setTimeout(resolve, 300));
+			// Positive control: the cleanup assertion must reject a running PID.
+			await assert.rejects(assertProcessStopped(process.pid, 0), /still running/);
 			await client.close();
 			assert.ok(descendant);
-			if (process.platform === "linux") {
-				let state = "absent";
-				try { state = readFileSync(`/proc/${descendant}/stat`, "utf8").split(") ").at(-1)!.split(" ").slice(0, 3).join(" "); } catch { /* Process was reaped. */ }
-				test.diagnostic(`[DEBUG-acp-orphan] descendant ${descendant}: state/parent/group ${state}`);
-			}
-			assert.throws(() => process.kill(descendant!, 0), "an exited adapter must not leave its descendant alive");
+			await assertProcessStopped(descendant);
 		} finally {
 			await client.close();
 			if (descendant) { try { process.kill(descendant); } catch { /* Already disposed by the client. */ } }
