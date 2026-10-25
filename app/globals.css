@@ -150,6 +150,45 @@
 	background: rgb(138 59 44 / 0.2);
 }
 
+/* ONE DARK PRO (<html class="dark onedark">): the VS Code theme's own colors
+   (zhuangtongfa.material-theme). The page is its editor background, raised
+   surfaces use its hover/selection grey, menus its darker widget grey, text
+   its #abb2bf with #d7dae0 for highlighted ink, and its syntax colors become
+   accents: blue (functions) for buttons and links, purple (keywords) for the
+   IMPORTANT callout. It keeps "dark" alongside so code blocks use their dark
+   syntax colors; this block comes after .dark, so its tokens win. */
+.onedark {
+	color-scheme: dark;
+	--background: #282c34;
+	--foreground: #abb2bf;
+	--card: #2c313a;
+	--card-foreground: #abb2bf;
+	--popover: #21252b;
+	--popover-foreground: #abb2bf;
+	--primary: #61afef;
+	--primary-foreground: #282c34;
+	--secondary: #2c313a;
+	--secondary-foreground: #abb2bf;
+	--muted: #2c313a;
+	--muted-foreground: #7f848e;
+	--accent: #3a3f4b;
+	--accent-foreground: #d7dae0;
+	--destructive: #e06c75;
+	--border: #3e4452;
+	--input: #3e4452;
+	--ring: #528bff;
+	--lh-ink-strong: var(--foreground);
+	--lh-ink-italic: var(--foreground);
+	--lh-mark-ink: #d7dae0;
+	--lh-mark-ring: #61afef;
+	--lh-callout-border: #c678dd;
+	--lh-strong-line: #abb2bf;
+}
+
+.onedark ::selection {
+	background: rgb(103 118 150 / 0.38);
+}
+
 /* CMU Serif bold (titles) — bundled local file, no CDN dependency. */
 @font-face {
 	font-family: "lh-cmu";

@@ -140,9 +140,9 @@ describe("the emphasis-ink factory ruling (globals.css)", () => {
 
 	it("every theme block defaults the inks to the regular text color", () => {
 		const css = fs.readFileSync("app/globals.css", "utf-8");
-		// :root, .dark and .paper
-		assert.equal((css.match(/--lh-ink-strong: var\(--foreground\)/g) ?? []).length, 3, "all theme blocks");
-		assert.equal((css.match(/--lh-ink-italic: var\(--foreground\)/g) ?? []).length, 3, "all theme blocks");
+		// :root, .dark, .paper and .onedark
+		assert.equal((css.match(/--lh-ink-strong: var\(--foreground\)/g) ?? []).length, 4, "all theme blocks");
+		assert.equal((css.match(/--lh-ink-italic: var\(--foreground\)/g) ?? []).length, 4, "all theme blocks");
 	});
 
 	it("the appearance rows' empty-state labels say 'same as text'", () => {

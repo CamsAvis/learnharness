@@ -33,7 +33,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
-	appearanceModeClass,
+	appearanceChoice,
+	isAppearanceMode,
 	resolveSettings,
 	type AppearanceSettings,
 	type GraphSettings,
@@ -100,8 +101,9 @@ export function AppearanceSection({
 }) {
 	const { appearance: resolved } = useAppearance();
 	const md = appearance?.mdRendering;
-	// The custom background only applies in dark mode (appearance.tsx).
-	const paperMode = appearanceModeClass(resolved.mode) === "paper";
+	// The custom background only applies in plain dark mode (appearance.tsx);
+	// Paper and One Dark Pro have their own palettes.
+	const ownPalette = appearanceChoice(resolved.mode) !== "dark";
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -189,25 +191,27 @@ export function AppearanceSection({
 
 	return (
 		<>
-			{/* Mode: Dark (the default) or Paper (ivory + burgundy, globals.css
-			    .paper). "light" stays reserved for upstream's planned light
-			    palette and isn't offered until it exists. */}
+			{/* Mode: Dark (the default), Paper (ivory + burgundy) or One Dark Pro
+			    (globals.css .paper / .onedark). "light" stays reserved for
+			    upstream's planned light palette and isn't offered until it
+			    exists. */}
 			<SettingsRow label="Mode" testid="row-mode">
 				<ThinSelect
-					value={appearanceModeClass(resolved.mode)}
+					value={appearanceChoice(resolved.mode)}
 					ariaLabel="mode"
-					onChange={(v) => onSectionChange({ ...appearance, mode: v === "paper" ? "paper" : "dark" })}
+					onChange={(v) => onSectionChange({ ...appearance, mode: isAppearanceMode(v) ? appearanceChoice(v) : "dark" })}
 					testid="select-mode"
 				>
 					<option value="dark">Dark</option>
 					<option value="paper">Paper</option>
+					<option value="onedark">One Dark Pro</option>
 				</ThinSelect>
 			</SettingsRow>
 			<SettingsRow
 				label="Background"
-				hint={paperMode ? "Dark mode only" : `Empty = ${resolved.background ?? "#141414"}`}
+				hint={ownPalette ? "Dark mode only" : `Empty = ${resolved.background ?? "#141414"}`}
 				testid="row-background"
-				dimmed={paperMode}
+				dimmed={ownPalette}
 			>
 				<CommitInput
 					value={appearance?.background ?? ""}

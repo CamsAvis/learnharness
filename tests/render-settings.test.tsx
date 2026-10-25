@@ -233,6 +233,7 @@ describe("AppearanceSection (thin SSR)", () => {
 		assert.ok(!tagOf(html, "row-mode").includes("opacity-40"), "mode row not dimmed");
 		assert.ok(html.includes('<option value="dark"'), "dark offered");
 		assert.ok(html.includes('<option value="paper"'), "paper offered");
+		assert.ok(html.includes('<option value="onedark"'), "one dark pro offered");
 		assert.ok(!html.includes('<option value="light"'), "light stays unoffered until it has a palette");
 	});
 
