@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { Type, normalizeContext, type AssistantMessageEvent, type Message } from "@earendil-works/pi-ai";
@@ -122,7 +122,7 @@ describe("ACP engine over real subprocess stdio", () => {
 		const engine = createAcpEngine("codex", { command: "does-not-exist-acp" });
 		assert.equal((await engine.streamFn(engine.model, context(), { signal: controller.signal }).result()).stopReason, "aborted");
 	});
-	it("retains ownership of descendants after the adapter exits", async () => {
+	it("retains ownership of descendants after the adapter exits", async (test) => {
 		let descendant: number | undefined;
 		const client = new AcpClient("codex", config("orphan"), { onNotification: (_method, params) => {
 			const update = params.update as { content?: { text?: string } };
@@ -135,6 +135,11 @@ describe("ACP engine over real subprocess stdio", () => {
 			await new Promise((resolve) => setTimeout(resolve, 300));
 			await client.close();
 			assert.ok(descendant);
+			if (process.platform === "linux") {
+				let state = "absent";
+				try { state = readFileSync(`/proc/${descendant}/stat`, "utf8").split(") ").at(-1)!.split(" ").slice(0, 3).join(" "); } catch { /* Process was reaped. */ }
+				test.diagnostic(`[DEBUG-acp-orphan] descendant ${descendant}: state/parent/group ${state}`);
+			}
 			assert.throws(() => process.kill(descendant!, 0), "an exited adapter must not leave its descendant alive");
 		} finally {
 			await client.close();
