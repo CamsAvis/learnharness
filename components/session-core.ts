@@ -164,6 +164,9 @@ function sameDetails(a: unknown, b: unknown): boolean {
 export interface SessionState {
 	messages: LhViewMessage[];
 	nativeMessages: LhMessage[];
+	/** The server record alone (no optimistic or streaming tail): the
+	 *  settled messages a lesson highlight may anchor to. */
+	recordMessages: LhMessage[];
 	/** Completed conversation usage; null after compaction or before first usage. */
 	contextTokens: number | null;
 	status: SessionStatus;
@@ -274,6 +277,7 @@ export class SessionModel {
 		return {
 			messages: projectView(messages, live),
 			nativeMessages: messages,
+			recordMessages: this.base,
 			contextTokens: measuredContextTokens(messages, this.incompleteUsageIds),
 			status: this.statusValue,
 			error: this.errorValue ?? providerError,

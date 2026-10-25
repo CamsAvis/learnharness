@@ -52,6 +52,10 @@ export interface ChatRecord {
 	extractions?: ExtractionRunUsage[];
 	/** Per-chat model/thinking overrides for the conversation agents. */
 	settings?: ChatSettings;
+	/** The learner's private highlights and notes on this lesson's text.
+	 *  A sibling field like `turns`: nothing rides inside messages. Never
+	 *  sent to the model and never part of extraction. Absent = none. */
+	highlights?: LessonHighlight[];
 	/** SCHEMA STAMP (schema-versioning wave, owner 2026-10-10): LAZY v1 —
 	 *  existing records stay unstamped (absence reads as v1); every write
 	 *  stamps the current version. A record stamped NEWER than this build
@@ -62,6 +66,41 @@ export interface ChatRecord {
 
 /** The chat record format this build writes and understands. */
 export const CURRENT_CHAT_VERSION = 1;
+
+// ─── Lesson highlights (fork feature) ────────────────────────────────────────
+
+/** The four highlighter colors; yellow is the default. */
+export type HighlightColor = "yellow" | "green" | "blue" | "pink";
+
+/** Where a highlight's text lives in the rendered lesson, as text-quote
+ *  context inside its anchor's text map (components/highlight-dom.ts). */
+export interface HighlightQuote {
+	/** The highlighted text itself (math as `$tex$` / `$$tex$$` tokens). */
+	exact: string;
+	/** Up to 32 characters just before `exact` in the anchor's text. */
+	prefix: string;
+	/** Up to 32 characters just after `exact` in the anchor's text. */
+	suffix: string;
+	/** Offset of `exact` in the anchor's text when it was made — only a
+	 *  tie-break hint; the quote context is what locates it. */
+	start: number;
+}
+
+/** One highlight on a lesson (named to avoid the DOM's `Highlight`). */
+export interface LessonHighlight {
+	/** Client-minted id (the PUT route is an idempotent upsert by it). */
+	id: string;
+	/** The anchor key (core/highlights.ts): `t:<partId>` teacher text,
+	 *  `u:<messageId>` learner message, `q:<messageId>:<toolCallId>`
+	 *  answered question card. */
+	anchor: string;
+	quote: HighlightQuote;
+	color: HighlightColor;
+	/** The learner's note; empty string = none yet. */
+	comment: string;
+	createdAt: string;
+	updatedAt: string;
+}
 
 /** The conversation agents' runtime model choice (model-control wave,
  *  2026-09-12): a per-chat override of config.ts's pinned prober/teacher

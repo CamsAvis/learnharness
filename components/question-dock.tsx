@@ -461,6 +461,9 @@ function QuestionDockForm({
 		if (!active || rowCount === 0) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			const t = e.target as HTMLElement | null;
+			// Keys inside an open menu or the highlights panel belong there:
+			// arrows walk the menu, Tab moves through notes — never the rows.
+			if (t?.closest?.("[data-lh-menu], [data-hl-panel]")) return;
 			// A TYPING field is where keys mean text (owner round 4): the
 			// thinking/answer fields, search boxes, renames — never a range
 			// input, whose focus after a click or drag must not kill the

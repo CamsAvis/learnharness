@@ -10,7 +10,7 @@
  * the same engine (problem/conclude results render as tool blocks,
  * markers are invisible by the engine's law).
  */
-import { sessionMarkdown } from "@/src/core";
+import { highlightsMarkdown, sessionMarkdown } from "@/src/core";
 import { getChat } from "@/src/server";
 
 /** Filename-safe title (own module scope on purpose: tiny + pure). */
@@ -27,7 +27,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 	const { id } = await ctx.params;
 	const record = getChat(id);
 	if (!record) return Response.json({ error: "Unknown chat" }, { status: 404 });
-	const markdown = sessionMarkdown(record.messages, { title: record.title, anchors: false });
+	const body = sessionMarkdown(record.messages, { title: record.title, anchors: false });
+	// The learner's highlights ride ONLY this export (fork feature):
+	// sessionMarkdown also feeds extraction, which must never see notes.
+	const notes = highlightsMarkdown(record.messages, record.highlights ?? []);
+	const markdown = notes ? `${body.replace(/\s+$/, "")}\n\n${notes}\n` : body;
 	return new Response(markdown, {
 		headers: {
 			"content-type": "text/markdown; charset=utf-8",

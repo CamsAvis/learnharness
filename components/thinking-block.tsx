@@ -103,6 +103,9 @@ export function ThinkingBlock({
 		   11px rung). */
 		<div
 			data-testid={testId}
+			// Thinking rows are never highlightable (lesson highlights cover
+			// always-visible text only); the text map skips them.
+			data-hl-exclude=""
 			data-commit={dataCommit === undefined ? undefined : dataCommit ? "true" : "false"}
 			className={cn(
 				// Round five (owner, 2026-10-07): total inset still 3ch (the

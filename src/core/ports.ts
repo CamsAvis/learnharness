@@ -13,6 +13,7 @@ import type { LhMessage } from "./native-messages.ts";
 import type {
 	ChatRecord,
 	ChatSettings,
+	LessonHighlight,
 	ChatSummary,
 	GraphChain,
 	GraphNode,
@@ -63,6 +64,11 @@ export interface ChatStore {
 	 *  job cleanup are the caller's choreography (core/graph-deletion.ts +
 	 *  the DELETE route), not the store's. */
 	deleteChat(id: string): boolean;
+	/** Upsert one lesson highlight by id (fork feature). Not conversation
+	 *  activity: updatedAt stays put and the store stays silent. */
+	saveHighlight(id: string, highlight: LessonHighlight): void;
+	/** Remove one lesson highlight; false when the chat or id is unknown. */
+	deleteHighlight(id: string, highlightId: string): boolean;
 }
 
 // ─── GraphStore — the append-only evidence ledgers (data/graph) ──────────────

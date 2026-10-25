@@ -12,7 +12,7 @@ import * as path from "node:path";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, PlanTree, TurnUsage } from "../core/contracts.ts";
+import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, LessonHighlight, PlanTree, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
@@ -84,7 +84,7 @@ function listChats(): ChatSummary[] {
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getChat(f.slice(0, -5)))
 			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, ...summary }) => {
+			.map(({ messages, tree, turns, extractions, highlights: _highlights, ...summary }) => {
 				// Per-record isolation (Wave B): a record whose messages fail the
 				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
 				// zero-back-compat wipe makes these "corrupt") must not blank the
@@ -195,6 +195,30 @@ function deleteChat(id: string): boolean {
 	}
 }
 
+/** Upsert one lesson highlight by id (fork feature). Like saveSettings:
+ *  a note is not conversation activity, so updatedAt stays put and the
+ *  write stays silent (the route announces highlights-changed itself).
+ *  Re-reads the record first, so a turn persisting meanwhile is kept. */
+function saveHighlight(id: string, highlight: LessonHighlight): void {
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	const list = record.highlights ?? [];
+	const at = list.findIndex((h) => h.id === highlight.id);
+	record.highlights = at === -1 ? [...list, highlight] : list.map((h, i) => (i === at ? highlight : h));
+	writeChat(record);
+}
+
+/** Remove one lesson highlight. False when the chat or highlight is unknown. */
+function deleteHighlight(id: string, highlightId: string): boolean {
+	const record = getChat(id);
+	if (!record) return false;
+	const list = record.highlights ?? [];
+	if (!list.some((h) => h.id === highlightId)) return false;
+	record.highlights = list.filter((h) => h.id !== highlightId);
+	writeChat(record);
+	return true;
+}
+
 /** Persist the session plan tree (plan tools call this in execute). */
 function saveTree(id: string, tree: PlanTree): void {
 	const record = getChat(id);
@@ -216,4 +240,6 @@ export const chatStore: ChatStore = {
 	deleteChat,
 	appendTurnUsage,
 	appendExtractionUsage,
+	saveHighlight,
+	deleteHighlight,
 };

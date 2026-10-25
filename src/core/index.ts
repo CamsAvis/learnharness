@@ -46,6 +46,9 @@ export * from "./input-events.ts";
 // canon (one continuous assistant document, step separators) ported from
 // the deleted server projection to the client side. Pure, browser-safe.
 export * from "./view.ts";
+// Lesson highlights (fork feature): anchors, validation, quote location,
+// ordering and the export section. Pure, browser-safe.
+export * from "./highlights.ts";
 export * from "./tool-parts.ts";
 export * from "./prices.ts";
 export * from "./context-usage.ts";
