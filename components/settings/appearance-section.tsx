@@ -33,6 +33,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	appearanceModeClass,
 	resolveSettings,
 	type AppearanceSettings,
 	type GraphSettings,
@@ -99,6 +100,8 @@ export function AppearanceSection({
 }) {
 	const { appearance: resolved } = useAppearance();
 	const md = appearance?.mdRendering;
+	// The custom background only applies in dark mode (appearance.tsx).
+	const paperMode = appearanceModeClass(resolved.mode) === "paper";
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -186,15 +189,25 @@ export function AppearanceSection({
 
 	return (
 		<>
-			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed>
-				<ThinSelect value="dark" ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
+			{/* Mode: Dark (the default) or Paper (ivory + burgundy, globals.css
+			    .paper). "light" stays reserved for upstream's planned light
+			    palette and isn't offered until it exists. */}
+			<SettingsRow label="Mode" testid="row-mode">
+				<ThinSelect
+					value={appearanceModeClass(resolved.mode)}
+					ariaLabel="mode"
+					onChange={(v) => onSectionChange({ ...appearance, mode: v === "paper" ? "paper" : "dark" })}
+					testid="select-mode"
+				>
 					<option value="dark">Dark</option>
+					<option value="paper">Paper</option>
 				</ThinSelect>
 			</SettingsRow>
 			<SettingsRow
 				label="Background"
-				hint={`Empty = ${resolved.background ?? "#141414"}`}
+				hint={paperMode ? "Dark mode only" : `Empty = ${resolved.background ?? "#141414"}`}
 				testid="row-background"
+				dimmed={paperMode}
 			>
 				<CommitInput
 					value={appearance?.background ?? ""}

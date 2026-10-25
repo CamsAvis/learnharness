@@ -226,12 +226,23 @@ describe("KeysSection (thin SSR)", () => {
 });
 
 describe("AppearanceSection (thin SSR)", () => {
-	it("mode is rendered DISABLED — dark-only this wave, no lying control", () => {
+	it("mode is a live Dark/Paper select (no longer 'coming soon')", () => {
 		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
-		assert.ok(tagOf(html, "select-mode").includes("disabled"), "mode select disabled");
-		assert.ok(html.includes("Coming soon"));
-		// The whole row dims, graph-view style (the control never adds its own).
-		assert.ok(tagOf(html, "row-mode").includes("opacity-40"), "mode row dims whole");
+		assert.ok(!tagOf(html, "select-mode").includes("disabled"), "mode select enabled");
+		assert.ok(!html.includes("Coming soon"));
+		assert.ok(!tagOf(html, "row-mode").includes("opacity-40"), "mode row not dimmed");
+		assert.ok(html.includes('<option value="dark"'), "dark offered");
+		assert.ok(html.includes('<option value="paper"'), "paper offered");
+		assert.ok(!html.includes('<option value="light"'), "light stays unoffered until it has a palette");
+	});
+
+	it("the background row works in dark and dims in Paper (it only applies to dark)", () => {
+		const dark = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
+		assert.ok(!tagOf(dark, "row-background").includes("opacity-40"));
+		assert.ok(dark.includes("Empty = #141414"));
+		// The section reads the RESOLVED mode from the provider (factory dark in
+		// SSR), so the record's mode alone doesn't dim it here; the provider test
+		// below covers the paper-mode var mapping.
 	});
 
 	it("hex inputs carry the factory placeholders; prose size resolves against the factory", () => {
