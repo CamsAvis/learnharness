@@ -52,7 +52,10 @@ export type ModelRole =
 	| "visualMaker"
 	| "pdfReader"
 	| "extractor"
-	| "auditor";
+	| "auditor"
+	/** The question side-chat helper: explains what an open question means
+	 *  without answering it. Cheap slot; no settings row of its own. */
+	| "clarifier";
 
 /**
  * The LIVE graph store (src/store/graph.ts) — owned by the app's extraction

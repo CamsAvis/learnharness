@@ -12,7 +12,7 @@ import * as path from "node:path";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, PlanTree, TurnUsage } from "../core/contracts.ts";
+import type { ChatRecord, ChatSettings, ChatSummary, ClarifyExchange, ExtractionRunUsage, PlanTree, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
@@ -156,6 +156,17 @@ function appendExtractionUsage(id: string, entry: ExtractionRunUsage): void {
 	writeChat(record);
 }
 
+/** Append one side-chat exchange to a question's thread. Like
+ * saveSettings, not conversation activity: updatedAt stays put. */
+function appendClarification(id: string, toolCallId: string, exchange: ClarifyExchange): ClarifyExchange[] {
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	const thread = [...(record.clarifications?.[toolCallId] ?? []), exchange];
+	record.clarifications = { ...record.clarifications, [toolCallId]: thread };
+	writeChat(record);
+	return thread;
+}
+
 /** Persist the per-chat model/thinking settings — replace-whole (the
  * picker sends the complete object; absent = config defaults). */
 function saveSettings(id: string, settings: ChatSettings): void {
@@ -216,4 +227,5 @@ export const chatStore: ChatStore = {
 	deleteChat,
 	appendTurnUsage,
 	appendExtractionUsage,
+	appendClarification,
 };

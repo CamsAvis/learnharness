@@ -23,8 +23,9 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
 	if (answer.dismissed) {
 		return (
-			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
+			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground [&>*:last-child]:mb-0">
 				<span className="font-medium">{answer.questionText}</span> — skipped
+				<SideChatRecord answer={answer} />
 			</div>
 		);
 	}
@@ -192,6 +193,8 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 				/>
 			)}
 
+			<SideChatRecord answer={answer} />
+
 			{/* px-3→removed: card p-4 + box px-3 double-inset sat the "Why" label deeper
 			    than the option box edges (owner, round 3). Sides flush with everything
 			    else; py-2 stays for vertical air. */}
@@ -230,5 +233,35 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 			)}
 		</div>
 		</>
+	);
+}
+
+/** The side chat the learner had before answering, tucked behind a toggle
+ *  like the explanation: "Asked 2 questions first". */
+function SideChatRecord({ answer }: { answer: QuestionAnswerData }) {
+	const [open, setOpen] = useState(false);
+	const exchanges = Array.isArray(answer.clarifications) ? answer.clarifications : [];
+	if (exchanges.length === 0) return null;
+	return (
+		<div className="mt-2" data-testid="answered-clarifications">
+			<button
+				type="button"
+				onClick={() => setOpen((v) => !v)}
+				aria-expanded={open}
+				className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+			>
+				{open ? "Hide side chat" : `Asked ${exchanges.length} question${exchanges.length === 1 ? "" : "s"} first`}
+			</button>
+			{open && (
+				<div className="mt-1.5 flex flex-col gap-2.5 rounded-lg bg-muted px-3 py-2 text-sm">
+					{exchanges.map((ex, i) => (
+						<div key={`${i}:${ex.at}`} className="flex flex-col gap-1">
+							<div className="whitespace-pre-wrap text-foreground">“{ex.asked}”</div>
+							<MessageResponse className="lh-prose text-muted-foreground">{ex.reply}</MessageResponse>
+						</div>
+					))}
+				</div>
+			)}
+		</div>
 	);
 }
