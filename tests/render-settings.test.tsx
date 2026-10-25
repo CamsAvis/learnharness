@@ -237,6 +237,15 @@ describe("AppearanceSection (thin SSR)", () => {
 		assert.ok(!html.includes('<option value="light"'), "light stays unoffered until it has a palette");
 	});
 
+	it("offers a VS Code theme upload next to the mode", () => {
+		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
+		assert.ok(html.includes('data-testid="row-vscode-themes"'));
+		assert.ok(html.includes("Upload theme"));
+		assert.ok(/<input[^>]*type="file"[^>]*accept=".json,.jsonc,application\/json"/.test(html), "a .json file picker");
+		// The list only appears once themes exist (loaded after mount).
+		assert.ok(!html.includes('data-testid="theme-list"'));
+	});
+
 	it("the background row works in dark and dims in Paper (it only applies to dark)", () => {
 		const dark = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
 		assert.ok(!tagOf(dark, "row-background").includes("opacity-40"));

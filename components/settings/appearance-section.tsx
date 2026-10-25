@@ -28,15 +28,24 @@
  * Emphasis inks (same wave): the factory tokens default to the regular
  * text color now (globals.css); the rows' empty-state labels say "same
  * as text".
+ *
+ * Uploaded VS Code themes: the "VS Code themes" row uploads a theme file
+ * (the server maps and stores it, /api/themes) and applies it at once;
+ * uploaded themes join the Mode list under their own names and can be
+ * deleted. Deleting the theme in use switches back to Dark first.
  */
 
 import { useEffect, useRef, useState } from "react";
 import {
+	CUSTOM_THEME_LIMITS,
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
 	appearanceChoice,
+	customThemeSummary,
 	isAppearanceMode,
 	resolveSettings,
 	type AppearanceSettings,
+	type CustomTheme,
+	type CustomThemeSummary,
 	type GraphSettings,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
@@ -48,6 +57,10 @@ import { CommitInput, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
 export const DEFAULT_READING_FONT = "Source Sans 3";
+
+/** The built-in mode labels: an uploaded theme with the same name gets an
+ *  "(uploaded)" suffix in the Mode list, so the closed select tells them apart. */
+const BUILT_IN_MODE_LABELS = new Set(["Dark", "Paper", "One Dark Pro"]);
 
 /** The dev-browser fallback list (queryLocalFonts is absent there):
  *  the app's own knowns plus a handful of ubiquitous macOS families,
@@ -99,11 +112,73 @@ export function AppearanceSection({
 	/** PUT the whole appearance section; the page re-applies on success. */
 	onSectionChange: (next: AppearanceSettings) => void;
 }) {
-	const { appearance: resolved } = useAppearance();
+	const { appearance: resolved, activeTheme, rememberTheme } = useAppearance();
 	const md = appearance?.mdRendering;
 	// The custom background only applies in plain dark mode (appearance.tsx);
-	// Paper and One Dark Pro have their own palettes.
+	// Paper, One Dark Pro and uploaded themes have their own palettes.
 	const ownPalette = appearanceChoice(resolved.mode) !== "dark";
+
+	// Uploaded VS Code themes: the list (names only), the upload's state,
+	// and what the last upload or delete had to say.
+	const [themeList, setThemeList] = useState<CustomThemeSummary[]>([]);
+	const [uploading, setUploading] = useState(false);
+	const [themeNote, setThemeNote] = useState<{ error: boolean; lines: string[] } | null>(null);
+	const themeFileRef = useRef<HTMLInputElement>(null);
+	useEffect(() => {
+		let alive = true;
+		fetch("/api/themes")
+			.then((r) => r.json())
+			.then((body: { themes?: CustomThemeSummary[] }) => {
+				if (alive && Array.isArray(body.themes)) setThemeList(body.themes);
+			})
+			.catch(() => {/* the list stays empty; upload still works */});
+		return () => {
+			alive = false;
+		};
+	}, []);
+	const customId = resolved.mode === "custom" ? resolved.customThemeId : null;
+	// The picked theme shows in the Mode list even before the list loads.
+	const listedThemes =
+		customId && activeTheme?.id === customId && !themeList.some((t) => t.id === customId)
+			? [...themeList, customThemeSummary(activeTheme)]
+			: themeList;
+	const modeValue = customId ? `custom:${customId}` : appearanceChoice(resolved.mode) === "custom" ? "dark" : appearanceChoice(resolved.mode);
+
+	const uploadTheme = async (file: File) => {
+		setUploading(true);
+		setThemeNote(null);
+		try {
+			if (file.size > CUSTOM_THEME_LIMITS.fileChars) throw new Error("This file is too large to be a color theme.");
+			const res = await fetch("/api/themes", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ text: await file.text(), fileName: file.name }),
+			});
+			const body = (await res.json().catch(() => ({}))) as { theme?: CustomTheme; warnings?: string[]; error?: string };
+			if (!res.ok || !body.theme) {
+				setThemeNote({ error: true, lines: [body.error ?? `The upload failed (${res.status}).`] });
+				return;
+			}
+			const theme = body.theme;
+			rememberTheme(theme);
+			setThemeList((list) => [...list, customThemeSummary(theme)]);
+			onSectionChange({ ...appearance, mode: "custom", customThemeId: theme.id });
+			setThemeNote({ error: false, lines: [`Applied ${theme.name}.`, ...(body.warnings ?? [])] });
+		} catch (err) {
+			setThemeNote({ error: true, lines: [err instanceof Error ? err.message : String(err)] });
+		} finally {
+			setUploading(false);
+			if (themeFileRef.current) themeFileRef.current.value = "";
+		}
+	};
+
+	const deleteTheme = async (theme: CustomThemeSummary) => {
+		setThemeNote(null);
+		if (customId === theme.id) onSectionChange({ ...appearance, mode: "dark", customThemeId: null });
+		const res = await fetch(`/api/themes/${encodeURIComponent(theme.id)}`, { method: "DELETE" }).catch(() => null);
+		if (res && (res.ok || res.status === 404)) setThemeList((list) => list.filter((t) => t.id !== theme.id));
+		else setThemeNote({ error: true, lines: [`Couldn't delete ${theme.name}. Try again.`] });
+	};
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -197,16 +272,88 @@ export function AppearanceSection({
 			    exists. */}
 			<SettingsRow label="Mode" testid="row-mode">
 				<ThinSelect
-					value={appearanceChoice(resolved.mode)}
+					value={modeValue}
 					ariaLabel="mode"
-					onChange={(v) => onSectionChange({ ...appearance, mode: isAppearanceMode(v) ? appearanceChoice(v) : "dark" })}
+					onChange={(v) =>
+						onSectionChange(
+							v.startsWith("custom:")
+								? { ...appearance, mode: "custom", customThemeId: v.slice("custom:".length) }
+								: { ...appearance, mode: isAppearanceMode(v) && v !== "custom" ? appearanceChoice(v) : "dark" },
+						)
+					}
 					testid="select-mode"
 				>
 					<option value="dark">Dark</option>
 					<option value="paper">Paper</option>
 					<option value="onedark">One Dark Pro</option>
+					{listedThemes.length > 0 && (
+						<optgroup label="Uploaded">
+							{listedThemes.map((t) => (
+								<option key={t.id} value={`custom:${t.id}`}>
+									{BUILT_IN_MODE_LABELS.has(t.name) ? `${t.name} (uploaded)` : t.name}
+								</option>
+							))}
+						</optgroup>
+					)}
 				</ThinSelect>
 			</SettingsRow>
+			{/* Uploaded VS Code themes: upload applies the theme at once. */}
+			<SettingsRow label="VS Code themes" hint="Upload a color theme's .json file" testid="row-vscode-themes">
+				<span className="flex items-center gap-2">
+					<button
+						type="button"
+						data-testid="upload-theme"
+						disabled={uploading}
+						onClick={() => themeFileRef.current?.click()}
+						className="rounded-sm border border-border px-3 py-1.5 font-ui text-xs disabled:opacity-40"
+					>
+						{uploading ? "Uploading…" : "Upload theme"}
+					</button>
+					<input
+						ref={themeFileRef}
+						type="file"
+						accept=".json,.jsonc,application/json"
+						className="hidden"
+						data-testid="theme-file"
+						onChange={(e) => {
+							const file = e.target.files?.[0];
+							if (file) void uploadTheme(file);
+						}}
+					/>
+				</span>
+			</SettingsRow>
+			{themeNote && (
+				<div
+					role={themeNote.error ? "alert" : "status"}
+					data-testid="theme-note"
+					className={themeNote.error ? "text-xs text-red-500" : "text-xs text-muted-foreground"}
+				>
+					{themeNote.lines.map((line, i) => (
+						<p key={i}>{line}</p>
+					))}
+				</div>
+			)}
+			{themeList.length > 0 && (
+				<ul data-testid="theme-list" className="flex flex-col gap-1 pb-1">
+					{themeList.map((t) => (
+						<li key={t.id} className="flex items-center justify-between gap-3 text-sm">
+							<span className="min-w-0 truncate">
+								{t.name}
+								<span className="ml-2 text-xs text-muted-foreground">{t.type}</span>
+								{customId === t.id && <span className="ml-2 text-xs text-muted-foreground">in use</span>}
+							</span>
+							<button
+								type="button"
+								aria-label={`Delete ${t.name}`}
+								onClick={() => void deleteTheme(t)}
+								className="shrink-0 px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+							>
+								Delete
+							</button>
+						</li>
+					))}
+				</ul>
+			)}
 			<SettingsRow
 				label="Background"
 				hint={ownPalette ? "Dark mode only" : `Empty = ${resolved.background ?? "#141414"}`}

@@ -76,12 +76,41 @@ export const oneDarkMermaidTheme: MermaidConfig = {
 	},
 };
 
+/** An uploaded VS Code theme (html.lh-custom): "base" painted from the
+ *  theme's own tokens, read off the page (its style block sets them as hex
+ *  colors, which mermaid's color math accepts). */
+function customMermaidTheme(dark: boolean): MermaidConfig {
+	const style = getComputedStyle(document.documentElement);
+	const v = (name: string) => style.getPropertyValue(name).trim();
+	return {
+		...mermaidTheme,
+		theme: "base",
+		themeVariables: {
+			darkMode: dark,
+			background: v("--background"),
+			primaryColor: v("--card"),
+			primaryTextColor: v("--foreground"),
+			primaryBorderColor: v("--primary"),
+			secondaryColor: v("--accent"),
+			tertiaryColor: v("--popover"),
+			mainBkg: v("--card"),
+			nodeBorder: v("--primary"),
+			lineColor: v("--muted-foreground"),
+			textColor: v("--foreground"),
+			clusterBkg: v("--popover"),
+			clusterBorder: v("--border"),
+			edgeLabelBackground: v("--background"),
+		},
+	};
+}
+
 /** The theme for the page's current mode, read at render time. Diagrams
  *  already on screen keep the colors they were drawn with until they
  *  re-render (a reload after switching modes). */
 function currentMermaidTheme(): MermaidConfig {
 	if (typeof document === "undefined") return mermaidTheme;
 	const classes = document.documentElement.classList;
+	if (classes.contains("lh-custom")) return customMermaidTheme(classes.contains("dark"));
 	if (classes.contains("paper")) return paperMermaidTheme;
 	if (classes.contains("onedark")) return oneDarkMermaidTheme;
 	return mermaidTheme;

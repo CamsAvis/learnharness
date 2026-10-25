@@ -24,7 +24,7 @@ import {
 import { Streamdown } from "streamdown";
 
 import { transformMathDelimiters } from "@/src/core";
-import { streamdownPlugins } from "./message";
+import { useStreamdownPlugins } from "./message";
 import { mdComponents } from "@/components/md-blocks";
 import { Shimmer } from "./shimmer";
 
@@ -200,7 +200,9 @@ export type ReasoningContentProps = ComponentProps<
 // remark-breaks) — reasoning renders the same contract as message text.
 
 export const ReasoningContent = memo(
-  ({ className, children, ...props }: ReasoningContentProps) => (
+  ({ className, children, ...props }: ReasoningContentProps) => {
+    const plugins = useStreamdownPlugins();
+    return (
     <CollapsibleContent
       className={cn(
         "mt-4 text-sm",
@@ -209,11 +211,12 @@ export const ReasoningContent = memo(
       )}
       {...props}
     >
-      <Streamdown components={mdComponents} plugins={streamdownPlugins}>
+      <Streamdown components={mdComponents} plugins={plugins}>
         {transformMathDelimiters(children)}
       </Streamdown>
     </CollapsibleContent>
-  )
+    );
+  }
 );
 
 Reasoning.displayName = "Reasoning";

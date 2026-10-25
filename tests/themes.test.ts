@@ -22,7 +22,7 @@ import { parseAppearanceSettingsBody } from "../src/server/settings-body.ts";
 
 describe("the paper appearance mode", () => {
 	it("is a known mode alongside dark, the reserved light, and onedark", () => {
-		assert.deepEqual([...APPEARANCE_MODES], ["dark", "light", "paper", "onedark"]);
+		assert.deepEqual([...APPEARANCE_MODES], ["dark", "light", "paper", "onedark", "custom"]);
 		assert.equal(isAppearanceMode("paper"), true);
 		assert.equal(isAppearanceMode("onedark"), true);
 		assert.equal(isAppearanceMode("sepia"), false);
@@ -58,7 +58,7 @@ describe("the paper appearance mode", () => {
 		assert.ok(parseAppearanceSettingsBody({ mode: "onedark" }).ok);
 		const bad = parseAppearanceSettingsBody({ mode: "sepia" });
 		assert.equal(bad.ok, false);
-		assert.match(bad.error, /dark, light, paper, onedark/);
+		assert.match(bad.error, /dark, light, paper, onedark, custom/);
 	});
 });
 
@@ -68,8 +68,8 @@ describe("custom background is dark-only", () => {
 		assert.equal(vars["--background"], "#202020");
 	});
 
-	it("is ignored in Paper and One Dark Pro, which keep their own palettes", () => {
-		for (const mode of ["paper", "onedark"] as const) {
+	it("is ignored in Paper, One Dark Pro and uploaded themes, which keep their own palettes", () => {
+		for (const mode of ["paper", "onedark", "custom"] as const) {
 			const vars = appearanceVars(resolveAppearance({ mode, background: "#202020" }));
 			assert.equal(vars["--background"], undefined, mode);
 			assert.equal(vars["--card"], undefined, mode);
