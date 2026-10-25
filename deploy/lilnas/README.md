@@ -30,6 +30,10 @@ PR #94 commits, pushes, builds a new release on the container, switches to it
 and health-checks it (rolling back if it doesn't answer). Every build also runs
 upstream's provider-payload and server-boot checks before it can go live.
 
+The switch stops the app for about 20 seconds (backup, then restart). Saved
+sessions are unaffected, but a reply that is streaming at that moment is cut
+off, so deploy between lessons.
+
 `-Test` additionally runs typecheck and the full suite before switching. On this
 2-CPU container one upstream test (`chatgpt-auth.test.ts`, "repeated real
 verified sign-in…") fails by timing even when rerun alone; it covers desktop

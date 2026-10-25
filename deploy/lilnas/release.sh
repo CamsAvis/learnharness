@@ -122,11 +122,14 @@ if [ -d "$HOME/learnharness-data" ]; then
 	chmod 700 "$HOME/backups"
 	BACKUP="$HOME/backups/learnharness-data-$(date +%Y%m%d-%H%M%S)-before-$SHORT.tgz"
 	(umask 077 && tar -czf "$BACKUP" -C "$HOME" learnharness-data)
-	echo "saved $(basename "$BACKUP") ($(du -h "$BACKUP" | cut -f1))"
+	# stat, not du: on ZFS, du reports a just-written file before it's allocated.
+	echo "saved $(basename "$BACKUP") ($(numfmt --to=iec --suffix=B "$(stat -c %s "$BACKUP")"))"
 	ls -1t "$HOME"/backups/learnharness-data-*.tgz | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
 fi
 
-log "Activating $SHORT (previous: ${PREV:+$(basename "$PREV")}${PREV:-none})"
+PREV_NAME=none
+[ -n "$PREV" ] && PREV_NAME=$(basename "$PREV")
+log "Activating $SHORT (previous: $PREV_NAME)"
 ln -sfn "$DIR" "$HOME/current"
 systemctl --user enable --quiet learnharness.service
 systemctl --user restart learnharness.service
