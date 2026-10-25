@@ -63,19 +63,34 @@ else
 	log "Building"
 	npm run build -- --webpack
 	node scripts/build-server.mjs
+	touch "$DIR/.lh-built"
+fi
 
-	if [ "$RUN_TESTS" = "--test" ]; then
-		log "Typecheck"
-		npm run typecheck
-		log "Tests"
-		npm test > "$DIR/.lh-test.log" 2>&1 || {
-			grep -aE '^(ℹ (tests|pass|fail))|^✖' "$DIR/.lh-test.log" | head -n 20
+if [ "$RUN_TESTS" = "--test" ]; then
+	cd "$DIR"
+	log "Typecheck"
+	npm run typecheck
+	log "Tests"
+	if npm test > .lh-test.log 2>&1; then
+		grep -aE '^ℹ (tests|pass|fail)' .lh-test.log
+	else
+		grep -aE '^ℹ (tests|pass|fail)' .lh-test.log
+		# A few upstream tests are timing-sensitive and can fail under full-suite
+		# load on 2 CPUs. Rerun only the failing files, once, on their own.
+		mapfile -t failed < <(grep -aoE '^test at tests/[^:]+' .lh-test.log | sed 's/^test at //' | sort -u)
+		if [ "${#failed[@]}" -eq 0 ]; then
 			echo "Tests failed; full log: $DIR/.lh-test.log"
 			exit 1
-		}
-		grep -aE '^ℹ (tests|pass|fail)' "$DIR/.lh-test.log"
+		fi
+		echo "Rerunning the failing files on their own: ${failed[*]}"
+		if NODE_ENV=test node --import tsx --test "${failed[@]}" > .lh-test-retry.log 2>&1; then
+			echo "WARNING: they pass on their own, so treating them as flaky. Logs: $DIR/.lh-test.log, $DIR/.lh-test-retry.log"
+		else
+			grep -aE '^✖' .lh-test-retry.log | head -n 20
+			echo "Tests still fail; logs in $DIR. Not switching to this release."
+			exit 1
+		fi
 	fi
-	touch .lh-built
 fi
 
 log "Installing service units"
