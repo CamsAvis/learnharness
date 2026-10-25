@@ -13,6 +13,7 @@ import type { LhMessage } from "./native-messages.ts";
 import type {
 	ChatRecord,
 	ChatSettings,
+	ClarifyExchange,
 	ChatSummary,
 	GraphChain,
 	GraphNode,
@@ -51,6 +52,10 @@ export interface ChatStore {
 	appendTurnUsage(id: string, entry: TurnUsage): void;
 	/** Append one extraction-run usage entry — idempotent per startedAt. */
 	appendExtractionUsage(id: string, entry: ExtractionRunUsage): void;
+	/** Append one side-chat exchange to an open question's thread (keyed by
+	 *  the question's toolCallId); returns the thread after the append. Not
+	 *  conversation activity: updatedAt stays put. */
+	appendClarification(id: string, toolCallId: string, exchange: ClarifyExchange): ClarifyExchange[];
 	/** Persist the per-chat model/thinking settings (the model control).
 	 *  Replace-whole: the picker sends the complete settings object. */
 	saveSettings(id: string, settings: ChatSettings): void;

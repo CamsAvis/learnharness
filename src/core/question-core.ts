@@ -19,6 +19,7 @@
 
 import { Type, type Static } from "typebox";
 import { stripModelValueDebris } from "./value-debris.ts";
+import type { ClarifyExchange } from "./contracts/chat.ts";
 
 // ─── shared types ───────────────────────────────────────────────────────────
 
@@ -468,6 +469,10 @@ export interface QuestionAnswerData {
 	committed?: string; // explain only (rendering): the model's committed answer
 	explanation?: string; // quiz only (rendering)
 	dismissed?: boolean;
+	/** The side chat the learner had about this question before answering
+	 *  (or skipping) it. The server copies it from the chat record when the
+	 *  answer lands; whatever the client sent is replaced. */
+	clarifications?: ClarifyExchange[];
 	answeredAt: string;
 }
 
@@ -762,7 +767,7 @@ export function dismissedAnswer(kind: QuestionKind, questionText: string): Quest
 }
 
 export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, unknown> {
-	if (ad.dismissed) return { kind: ad.kind, dismissed: true };
+	if (ad.dismissed) return withClarifications({ kind: ad.kind, dismissed: true }, ad);
 	const out: Record<string, unknown> = { kind: ad.kind };
 	if (ad.dontKnow) out.dontKnow = true;
 	// Array.isArray: the seam is called with `unknown` answers (test
@@ -783,5 +788,13 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	const thinking = ad.thinking ?? ad.note;
 	if (thinking) out.thinking = thinking;
 	if (ad.readingThinking) out.thinkingWhileReading = ad.readingThinking;
+	return withClarifications(out, ad);
+}
+
+/** The side chat, model-facing: the learner's questions and the helper's
+ *  replies, without timestamps. Absent when there was no side chat. */
+function withClarifications(out: Record<string, unknown>, ad: QuestionAnswerData): Record<string, unknown> {
+	if (Array.isArray(ad.clarifications) && ad.clarifications.length > 0)
+		out.clarifications = ad.clarifications.map((c) => ({ asked: c.asked, reply: c.reply }));
 	return out;
 }

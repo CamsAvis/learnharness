@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
+import { ArrowDownIcon, ChevronRightIcon, MessageCircleQuestionIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
@@ -90,6 +90,12 @@ export interface QuestionDockProps {
 	 *  and say so in the hint row. The server registry is the real gate;
 	 *  this is the affordance. */
 	compactionRunning?: boolean;
+	/** The side chat's toggle in the question header ("Ask about this").
+	 *  Absent = no side chat for this dock. */
+	clarify?: { count: number; open: boolean; onToggle: () => void };
+	/** The side chat rendered INSIDE the question area (narrow screens; on
+	 *  wide ones the DockOverlay opens it beside the question instead). */
+	clarifyInline?: React.ReactNode;
 }
 
 export function QuestionDock({
@@ -104,6 +110,8 @@ export function QuestionDock({
 	phase = "probe",
 	dictationClaim = true,
 	compactionRunning = false,
+	clarify,
+	clarifyInline,
 }: QuestionDockProps) {
 	// The probe-phase names (owner, 2026-10-09) canonicalize onto their
 	// teach twins for every dock concern — parse dispatch, labels, kinds:
@@ -158,6 +166,8 @@ export function QuestionDock({
 					onEscape={onEscape}
 					dictationClaim={dictationClaim}
 					compactionRunning={compactionRunning}
+					clarify={clarify}
+					clarifyInline={clarifyInline}
 				/>
 			</div>
 		</>
@@ -253,6 +263,8 @@ function QuestionDockForm({
 	onEscape,
 	dictationClaim = true,
 	compactionRunning = false,
+	clarify,
+	clarifyInline,
 }: Omit<QuestionDockProps, "expanded" | "onExpand" | "reveal">) {
 	const kind = toolQuestionKind(toolName);
 
@@ -461,6 +473,9 @@ function QuestionDockForm({
 		if (!active || rowCount === 0) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			const t = e.target as HTMLElement | null;
+			// The side chat's keys are its own (Tab included): it may float
+			// outside this form, and both listeners sit on the document.
+			if (t?.closest?.("[data-clarifier-panel]")) return;
 			// A TYPING field is where keys mean text (owner round 4): the
 			// thinking/answer fields, search boxes, renames — never a range
 			// input, whose focus after a click or drag must not kill the
@@ -544,8 +559,18 @@ function QuestionDockForm({
 			{/* Question area — scrolls internally if very tall; the bottom row stays put.
 			    Capped by the measured column (--dock-max-h; the old fixed 55dvh cut
 			    long questions short — owner round, 2026-10-05). */}
-			<div data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
-				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+			{/* With the side chat inline, the area also reserves room for the
+			    answer box below it (15rem), so the whole dock stays inside the
+			    column and the question's top can always be scrolled back to. */}
+			<div
+				data-session-find-root=""
+				className={cn(
+					"overflow-y-auto px-4 pt-3",
+					clarifyInline ? "max-h-[max(8rem,calc(var(--dock-max-h,55dvh)_-_15rem))]" : "max-h-[var(--dock-max-h,55dvh)]",
+				)}
+			>
+				<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+					<span className="min-w-0">
 					{toolName === "probe"
 						? "Probe"
 						: toolName === "recall"
@@ -558,6 +583,23 @@ function QuestionDockForm({
 										? "Explain"
 											: "Question"}
 					{qd.mode === "multi-select" && " · select all that apply"}
+					</span>
+					{clarify && (
+						<button
+							type="button"
+							data-testid="clarify-toggle"
+							aria-pressed={clarify.open}
+							onClick={clarify.onToggle}
+							className={cn(
+								"ml-auto flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 normal-case tracking-normal transition-colors hover:bg-accent hover:text-foreground",
+								clarify.open && "text-foreground",
+							)}
+						>
+							<MessageCircleQuestionIcon className="size-3.5" />
+							Ask about this
+							{clarify.count > 0 && <span className="tabular-nums text-muted-foreground">({clarify.count})</span>}
+						</button>
+					)}
 				</div>
 				<div className="mb-3 font-medium">
 					<MessageResponse>{qd.question}</MessageResponse>
@@ -718,6 +760,7 @@ function QuestionDockForm({
 						)}
 					</div>
 				)}
+				{clarifyInline}
 			</div>
 
 			{/* Confidence (owner, 2026-10-01; UI rounds same day): a snapped

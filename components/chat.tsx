@@ -51,6 +51,8 @@ import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog"
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
+import { ClarifierPanel, useClarifier } from "@/components/question-clarifier";
+import { cn } from "@/lib/utils";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
 import { PracticeDock } from "@/components/practice-dock";
@@ -101,6 +103,12 @@ const DOCK = "mx-auto w-full max-w-[46rem] px-4";
 const DOCK_W = 46 * 16;
 const MARGIN_GAP = 16;
 const MARGIN_MIN_W = 220;
+// The question side chat opens SIDE BY SIDE with the question (the two
+// split the band's full width) when the band is at least this wide;
+// narrower, each half would drop under ~500px, so it opens inside the
+// question card instead. SPLIT_MS is the slide's duration (duration-300).
+const CLARIFY_SPLIT_MIN_W = 1100;
+const SPLIT_MS = 300;
 // The dock overlay's gradient band (h-24) — part of the reserved tail.
 const GRADIENT_H = 96;
 // Fold thresholds (owner, scroll round 1, tuned round 3): pixel distance
@@ -1610,6 +1618,7 @@ export function Chat({
 					contextTokens={contextTokens}
 					pricing={pricing}
 					onReserve={setDockReserve}
+					onClarified={syncTurns}
 					dictationSlot={<DictationBar dictation={dictation} />}
 					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
@@ -1815,6 +1824,16 @@ export function probeArrivalExpanded(isAtBottom: boolean): boolean {
  * left the box stuck collapsed (resize round, verified live). Pure for
  * tests.
  */
+/** Where the open question's side chat goes (pure for tests): "split" =
+ *  beside the question, sharing the band's width (wide bands only, and only
+ *  once a teach check is revealed, like the check itself); "inline" =
+ *  inside the question card (narrow bands); null = closed. */
+export function clarifierPlacement(open: boolean, revealPending: boolean, bandWidth: number): "split" | "inline" | null {
+	if (!open) return null;
+	if (bandWidth < CLARIFY_SPLIT_MIN_W) return "inline";
+	return revealPending ? null : "split";
+}
+
 export function shouldStampGeometryMute(nextH: number, prevH: number, pending: boolean): boolean {
 	return pending && nextH > prevH + 1;
 }
@@ -1841,6 +1860,7 @@ function DockOverlay({
 	dictationCancel,
 	setupCta,
 	queuedSteers,
+	onClarified,
 }: {
 	pending: ReturnType<typeof findPendingToolCall>;
 	/** Compaction running for this chat (round 14) — the docks' submit
@@ -1888,6 +1908,8 @@ function DockOverlay({
 	/** The persistent setup CTA (BYOK, owner 2026-09-22): the same pill
 	 *  home and /chat/new carry, above the composer while slots are unset. */
 	setupCta?: React.ReactNode;
+	/** A side-chat reply landed (its usage is in the record now). */
+	onClarified?: () => void;
 }) {
 	const { isAtBottom, scrollToBottom, scrollRef } = useStickToBottomContext();
 	// Render-fresh bottom state (flicker round): the arrival block below reads
@@ -1907,6 +1929,8 @@ function DockOverlay({
 
 	const pendingId = pending?.toolCallId ?? null;
 	const initialPendingRef = useRef(pendingId);
+	// The open question's side chat (question-clarifier.tsx).
+	const clarifier = useClarifier(chatId, pendingId, onClarified);
 
 	// Teach-question ARRIVAL state, applied during render — BEFORE the
 	// first paint (owner, scroll-honesty round 2026-09-25). Until now the
@@ -2200,6 +2224,27 @@ function DockOverlay({
 		if (b) offer(b.getBoundingClientRect().height);
 	};
 
+	// The side chat's placement. The band width comes from the flank measure
+	// above (flankW = width / 2 - DOCK_W / 2 - 2 * MARGIN_GAP).
+	const placement = pending
+		? clarifierPlacement(clarifier.open, revealPending, flankW * 2 + DOCK_W + 4 * MARGIN_GAP)
+		: null;
+	const split = placement === "split";
+	// The split panel renders while split, and lingers through the slide
+	// back after closing. Once a slide settles, the band is re-measured:
+	// the question reflows to its new width inside the CSS transition,
+	// after this render's measure, and may have grown taller.
+	const [splitLingers, setSplitLingers] = useState(split);
+	useEffect(() => {
+		if (split) setSplitLingers(true);
+		const settle = setTimeout(() => {
+			if (!split) setSplitLingers(false);
+			measureBlock();
+		}, SPLIT_MS + 20);
+		return () => clearTimeout(settle);
+		// fire on the split flipping only
+	}, [split]);
+
 	const mode = pending
 		? `question:${pending.toolCallId}`
 		: practice
@@ -2265,7 +2310,20 @@ function DockOverlay({
 		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
 			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
 			<div ref={blockRef} className="relative bg-background pb-5" style={{ "--dock-max-h": dockMaxH ? `${dockMaxH}px` : undefined } as React.CSSProperties}>
-				<div className={DOCK}>
+				{/* The dock column. While the side chat is open on a wide band it
+				    widens to the band's full width (2rem padding each side) and
+				    the question slides left to make room: max-width, padding and
+				    the chat column's grow/margin/opacity all transition together,
+				    both ways. */}
+				<div
+					className={cn(
+						DOCK,
+						"transition-[max-width,padding] duration-300 ease-out",
+						split && "max-w-full px-8",
+					)}
+				>
+					<div className="flex items-stretch">
+					<div className="flex min-w-0 flex-1 flex-col justify-end">
 					{setupCta}
 					{/* The queued-steer indicator (owner spec 2026-10-03): quiet
 					    one-liners above the shell - right-aligned to where its corner
@@ -2308,10 +2366,24 @@ function DockOverlay({
 									reveal={revealPending}
 									phase={phase}
 									onExpand={expandAndReveal}
-									onSubmit={onSubmitAnswer}
+									// The answer carries the side chat for the optimistic card;
+									// the server swaps in the record's copy (the source of truth).
+									onSubmit={(output) =>
+										onSubmitAnswer(
+											clarifier.thread.length > 0 ? { ...output, clarifications: clarifier.thread } : output,
+										)
+									}
 									onEscape={dictationCancel}
 									dictationClaim={!revealPending}
 									compactionRunning={compactionRunning}
+									clarify={{
+										count: clarifier.thread.length,
+										open: clarifier.open,
+										onToggle: () => clarifier.setOpen(!clarifier.open),
+									}}
+									clarifyInline={
+										placement === "inline" ? <ClarifierPanel state={clarifier} variant="inline" /> : undefined
+									}
 								/>
 							) : practice ? (
 								<PracticeDock
@@ -2330,6 +2402,38 @@ function DockOverlay({
 								composer
 							)}
 						</div>
+					</div>
+					</div>
+					{/* The side chat's column: zero-width until the split opens, then
+					    it grows to half the row (the question column keeps the
+					    other half). The panel is pinned to the column's bottom and
+					    may rise ABOVE it (at least half the column tall, never
+					    taller than the column), over the lesson's right half only:
+					    the band itself stays the question's height, so the lesson
+					    above the question stays readable. It stays open while the
+					    question folds, so the lesson can be re-read mid-conversation. */}
+					{pending && (
+						<div
+							aria-hidden={!split}
+							data-testid="clarifier-column"
+							className={cn(
+								"relative min-w-0 basis-0 transition-[flex-grow,margin,opacity] duration-300 ease-out",
+								split ? "ml-4 grow opacity-100" : "ml-0 grow-0 opacity-0",
+							)}
+						>
+							{(split || splitLingers) && (
+								<ClarifierPanel
+									state={clarifier}
+									variant="side"
+									className="pointer-events-auto absolute inset-x-0 bottom-0 overflow-hidden"
+									style={{
+										minHeight: dockMaxH ? `max(100%, ${Math.round(dockMaxH / 2)}px)` : "100%",
+										maxHeight: dockMaxH ? dockMaxH - 40 : undefined,
+									}}
+								/>
+							)}
+						</div>
+					)}
 					</div>
 					{/* The stats row: beneath the composer/question shell, not
 					    flush to the screen bottom — static height, outside the
@@ -2372,7 +2476,7 @@ function DockOverlay({
 						onClick={onOpenPlan}
 						style={{ left: `calc(50% + ${DOCK_W / 2 + MARGIN_GAP}px)` }}
 						className={`absolute bottom-5 right-4 top-0 cursor-pointer transition-[filter,opacity] duration-300 ease-out ${
-							expanded && flankW >= MARGIN_MIN_W
+							expanded && flankW >= MARGIN_MIN_W && !split
 								? "pointer-events-auto opacity-100 blur-0"
 								: "pointer-events-none opacity-0 blur-md"
 						}`}

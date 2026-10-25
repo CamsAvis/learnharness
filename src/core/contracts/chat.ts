@@ -52,12 +52,24 @@ export interface ChatRecord {
 	extractions?: ExtractionRunUsage[];
 	/** Per-chat model/thinking overrides for the conversation agents. */
 	settings?: ChatSettings;
+	/** The question side chat: what the learner asked the clarifier about an
+	 *  open question before answering it, keyed by the question's toolCallId.
+	 *  The answer copies its thread when it lands, so the teacher reads it. */
+	clarifications?: Record<string, ClarifyExchange[]>;
 	/** SCHEMA STAMP (schema-versioning wave, owner 2026-10-10): LAZY v1 —
 	 *  existing records stay unstamped (absence reads as v1); every write
 	 *  stamps the current version. A record stamped NEWER than this build
 	 *  (the downgrade scenario) is REFUSED on read: a read-modify-write
 	 *  store must never rewrite what it doesn't understand. */
 	version?: number;
+}
+
+/** One side-chat exchange about an open question: the learner's question
+ *  about it and the clarifier's reply. Only complete pairs are saved. */
+export interface ClarifyExchange {
+	asked: string;
+	reply: string;
+	at: string;
 }
 
 /** The chat record format this build writes and understands. */

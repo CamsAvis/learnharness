@@ -39,6 +39,11 @@ import {
 	pendingProblemDismissalOf,
 } from "./native-messages.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
+import { attachClarifications } from "./clarify.ts";
+import type { ClarifyExchange } from "./contracts/chat.ts";
+
+/** The record fields the input seams read. */
+type InputRecord = { messages: LhMessage[]; kind?: string; clarifications?: Record<string, ClarifyExchange[]> };
 
 /** One client-originated input event (the POST body's `input`). */
 export type ChatInput =
@@ -129,7 +134,7 @@ export function parseUserSteerInput(input: unknown): UserSteerInput {
 /** The native appends a dismissal makes (pure — same orphan discipline
  *  as answers: the call must be a DANGLING question call, or — the
  *  practice variant — the ACTIVE problem). */
-export function dismissAppends(record: { messages: LhMessage[] }, input: DismissInput): LhMessage[] {
+export function dismissAppends(record: InputRecord, input: DismissInput): LhMessage[] {
 	if (input.type === "dismiss-problem") {
 		const active = activeProblemOf(record.messages);
 		if (!active || active.toolCallId !== input.problemCallId) {
@@ -144,7 +149,13 @@ export function dismissAppends(record: { messages: LhMessage[] }, input: Dismiss
 	if (input.answer.kind !== toolQuestionKind(pending.tool)) {
 		throw new ChatInputError("dismiss input's answer kind does not match the question");
 	}
-	return [newAnswerResult(input.toolCallId, pending.tool, input.answer)];
+	return [newAnswerResult(input.toolCallId, pending.tool, answerWithSideChat(record, input.toolCallId, input.answer))];
+}
+
+/** The answer carrying the question's saved side chat: the record is the
+ *  source, so a client can neither drop nor invent exchanges. */
+function answerWithSideChat(record: InputRecord, toolCallId: string, answer: QuestionAnswerData): QuestionAnswerData {
+	return attachClarifications(answer, record.clarifications?.[toolCallId]);
 }
 
 /** A malformed input event (the honest 400 — the orphan-trap discipline). */
@@ -195,7 +206,7 @@ export function parseChatInput(input: unknown): ChatInput {
  * double-answering.
  */
 export function inputAppends(
-	record: { messages: LhMessage[]; kind?: string },
+	record: InputRecord,
 	input: ChatInput,
 ): LhMessage[] {
 	switch (input.type) {
@@ -206,7 +217,7 @@ export function inputAppends(
 			if (!pending || pending.toolCallId !== input.toolCallId) {
 				throw new ChatInputError("answer input targets no pending question call");
 			}
-			return [newAnswerResult(input.toolCallId, pending.tool, input.answer)];
+			return [newAnswerResult(input.toolCallId, pending.tool, answerWithSideChat(record, input.toolCallId, input.answer))];
 		}
 		case "continue":
 			return dismissalConclusion(record);
