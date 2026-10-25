@@ -29,6 +29,8 @@ An accelerated-clock regression also reproduced the old absolute RPC deadline ex
 
 Offline subprocess tests cover sequential/parallel calls, schema-error retries, real teacher question pause/resume, a new engine with the same conversation ID, incompatible context/model/reasoning/tool changes, cross-conversation isolation, mismatched tool results, concurrent claims, stale abort signals, cancellation, adapter exit, idle expiry and finite-run cleanup. Codex history fixtures confirm that multiple tool calls retain one verified ephemeral session without producing stored chat files; ignored ephemeral flags still fail before prompting.
 
+The orphan-cleanup regression allows up to two seconds for asynchronous signal delivery. On Linux, an already terminated process awaiting OS reaping counts as stopped. A live-process positive control must fail the same assertion, so a running descendant cannot pass merely because it still has a PID. Temporary diagnostic logging was removed after reproducing the immediate-PID race in CI.
+
 Live checks on the installed Codex ACP 2.2.2 and Claude ACP 0.95.0 adapters used two dependent MCP calls: the first returned a random code that the second had to provide. Both completed with exactly **one initialization, one session and one prompt**. Codex used `gpt-6.1-sol` at low reasoning; Claude used `claude-sonnet-4-6` at low reasoning. Codex's native ephemeral acknowledgement was verified before inference, and both native workspaces were removed afterward. No app lesson was created for these checks. Credentials remained in the CLIs' own stores and were not printed or committed. A separate desktop chat lookup was unavailable, so it was not counted as an additional verification result.
 
 The final Windows test run executed **2,216 tests: 2,204 passed, 12 failed**, with no canceled or skipped tests. All ACP tests passed. The twelve remaining failures are the same POSIX mode/Windows ESM-path cases recorded in the [upstream sync report](upstream-sync-2026-10-25.md#verification). Typecheck, lint, a fresh Webpack build and payload curation passed; curation excluded 1,155 private trace entries.
@@ -42,6 +44,6 @@ node scripts/smoke-acp-reuse.mjs --electron
 
 Both HTTP exercises passed, as did the existing `smoke-server.mjs` checks under host Node and Electron, including offline provider initialization and dependency confinement.
 
-The standalone CI matrix runs both ACP HTTP exercises after payload curation on macOS, Windows and Linux. Local execution in this report covers Windows; the matrix supplies the additional platform checks.
+The standalone CI matrix runs both ACP HTTP exercises after payload curation on macOS, Windows and Linux. Local execution in this report covers Windows; CI supplies the additional platform checks and the complete Linux suite. Current results are linked from [PR #94](https://github.com/amosblomqvist/learnharness/pull/94).
 
-These checks demonstrate session reuse and preserved tool execution. They do not establish a measured latency improvement, a token/cache saving, or POSIX runtime behavior on this Windows host.
+These checks demonstrate session reuse and preserved tool execution. Latency improvement and token/cache savings have not been measured.
