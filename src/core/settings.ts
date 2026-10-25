@@ -277,19 +277,31 @@ export interface MdRenderingSettings {
 
 /** The appearance modes. "light" is reserved for upstream's planned light
  *  palette (not built yet); "paper" is the warm ivory theme with burgundy
- *  accents (globals.css .paper). */
-export const APPEARANCE_MODES = ["dark", "light", "paper"] as const;
+ *  accents (globals.css .paper); "onedark" is One Dark Pro's palette
+ *  (globals.css .onedark). */
+export const APPEARANCE_MODES = ["dark", "light", "paper", "onedark"] as const;
 export type AppearanceMode = (typeof APPEARANCE_MODES)[number];
 
 export function isAppearanceMode(value: unknown): value is AppearanceMode {
 	return typeof value === "string" && (APPEARANCE_MODES as readonly string[]).includes(value);
 }
 
-/** The class the mode puts on <html>. "light" has no palette yet, so it
- *  renders dark until one exists. Pure — the root layout (server) and the
- *  appearance provider (client) share it. */
-export function appearanceModeClass(mode: AppearanceMode | undefined): "dark" | "paper" {
-	return mode === "paper" ? "paper" : "dark";
+/** The modes the settings UI offers ("light" stays hidden until it has a
+ *  palette, and resolves to dark meanwhile). */
+export type AppearanceChoice = "dark" | "paper" | "onedark";
+
+export function appearanceChoice(mode: AppearanceMode | undefined): AppearanceChoice {
+	return mode === "paper" || mode === "onedark" ? mode : "dark";
+}
+
+/** The class(es) the mode puts on <html>. One Dark Pro keeps "dark" too:
+ *  code blocks switch to their dark syntax colors on Tailwind's dark
+ *  variant, and .onedark (after .dark in globals.css) overrides the grey
+ *  palette. Pure — the root layout (server) and the appearance provider
+ *  (client) share it. */
+export function appearanceModeClass(mode: AppearanceMode | undefined): "dark" | "paper" | "dark onedark" {
+	const choice = appearanceChoice(mode);
+	return choice === "onedark" ? "dark onedark" : choice;
 }
 
 /** Appearance settings — mode, colors, type, markdown emphasis. */

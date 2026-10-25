@@ -16,7 +16,7 @@ import { effectiveSettings } from "@/src/server";
 // data everywhere.
 export const dynamic = "force-dynamic";
 
-function themeClass(): "dark" | "paper" {
+function themeClass(): ReturnType<typeof appearanceModeClass> {
 	try {
 		return appearanceModeClass(effectiveSettings().appearance.mode);
 	} catch {

@@ -53,13 +53,38 @@ export const paperMermaidTheme: MermaidConfig = {
 	},
 };
 
+/** One Dark Pro mode (html.dark.onedark): "base" painted with the theme's
+ *  own colors (globals.css .onedark): grey panels, blue node borders. */
+export const oneDarkMermaidTheme: MermaidConfig = {
+	...mermaidTheme,
+	theme: "base",
+	themeVariables: {
+		darkMode: true,
+		background: "#282c34",
+		primaryColor: "#2c313a",
+		primaryTextColor: "#d7dae0",
+		primaryBorderColor: "#61afef",
+		secondaryColor: "#3a3f4b",
+		tertiaryColor: "#21252b",
+		mainBkg: "#2c313a",
+		nodeBorder: "#61afef",
+		lineColor: "#7f848e",
+		textColor: "#abb2bf",
+		clusterBkg: "#21252b",
+		clusterBorder: "#3e4452",
+		edgeLabelBackground: "#282c34",
+	},
+};
+
 /** The theme for the page's current mode, read at render time. Diagrams
  *  already on screen keep the colors they were drawn with until they
  *  re-render (a reload after switching modes). */
 function currentMermaidTheme(): MermaidConfig {
-	return typeof document !== "undefined" && document.documentElement.classList.contains("paper")
-		? paperMermaidTheme
-		: mermaidTheme;
+	if (typeof document === "undefined") return mermaidTheme;
+	const classes = document.documentElement.classList;
+	if (classes.contains("paper")) return paperMermaidTheme;
+	if (classes.contains("onedark")) return oneDarkMermaidTheme;
+	return mermaidTheme;
 }
 
 const plugin = createMermaidPlugin();

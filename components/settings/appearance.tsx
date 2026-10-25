@@ -7,9 +7,9 @@
  * Why variables and not className swaps: every seam the settings touch was
  * built token-first (--font-prose, --lh-prose-size, --lh-ink-strong, …),
  * so application is setProperty and nothing re-renders. The mode is a class
- * on <html> ("dark" or "paper"): the root layout renders it from the saved
- * settings on the server, and this provider swaps it when the setting
- * changes. Paper's palette lives in globals.css (.paper).
+ * on <html> ("dark", "paper", or "dark onedark"): the root layout renders it
+ * from the saved settings on the server, and this provider swaps it when
+ * the setting changes. The palettes live in globals.css (.paper, .onedark).
  *
  * The provider is mounted at the ROOT LAYOUT level (like ActivityProvider):
  * every page picks appearance up on load. The settings page writes a
@@ -77,7 +77,8 @@ export function derivedPalette(background: string): Record<string, string> {
 export function appearanceVars(a: ReturnType<typeof resolveAppearance>): Record<string, string> {
 	const vars: Record<string, string> = {};
 	// The custom background derives on the DARK curve (surfaces lighten), so it
-	// only applies in dark mode; Paper keeps its own palette (globals.css).
+	// only applies in plain dark mode; Paper and One Dark Pro keep their own
+	// palettes (globals.css).
 	if (a.background !== null && appearanceModeClass(a.mode) === "dark") Object.assign(vars, derivedPalette(a.background));
 	if (a.fontFamily !== null) {
 		vars["--font-prose"] = `"${a.fontFamily}", var(--font-sans3), ui-sans-serif, system-ui, sans-serif`;
@@ -136,8 +137,8 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 	useEffect(() => {
 		if (!loaded) return;
 		const root = document.documentElement;
-		root.classList.remove("dark", "paper");
-		root.classList.add(modeClass);
+		root.classList.remove("dark", "paper", "onedark");
+		root.classList.add(...modeClass.split(" "));
 	}, [loaded, modeClass]);
 
 	// The vars apply on every change — stringified as the change signal.
