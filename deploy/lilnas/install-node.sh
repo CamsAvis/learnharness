@@ -36,5 +36,7 @@ else
 fi
 
 ln -sfn "$DIR" "$OPT/node"
+# npm starts with '#!/usr/bin/env node', so node must be on PATH.
+export PATH="$OPT/node/bin:$PATH"
 "$OPT/node/bin/npm" config set prefix "$HOME/.local" >/dev/null
 echo "node $("$OPT/node/bin/node" --version), npm $("$OPT/node/bin/npm" --version)"
