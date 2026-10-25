@@ -1,0 +1,24 @@
+# systemd user service for the learnharness user. Installed by release.sh.
+#
+# launch-app.mjs (from PR 94) serves the built app on 127.0.0.1 only and turns
+# on local ACP subscriptions. The app has no login of its own, so it must stay
+# on loopback; the Cloudflare tunnel (learnharness-tunnel.service) is the only
+# way in from outside, behind Cloudflare Access.
+[Unit]
+Description=LearnHarness web app (loopback only)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/current
+Environment=LH_APP_PROFILE=%h/learnharness-data
+Environment=LH_PORT=3005
+Environment=CHROME_PATH=/usr/bin/google-chrome-stable
+Environment=NEXT_TELEMETRY_DISABLED=1
+Environment=PATH=%h/.local/opt/node/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/opt/node/bin/node scripts/launch-app.mjs
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
