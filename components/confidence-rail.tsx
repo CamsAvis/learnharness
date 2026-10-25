@@ -35,11 +35,14 @@ export const CONFIDENCE_COLORS: readonly string[] = [
 export function confidenceRailStyle(value: number): CSSProperties {
 	const color = CONFIDENCE_COLORS[CONFIDENCE_STOPS.indexOf(value)] ?? CONFIDENCE_COLORS[2]!;
 	return {
-		backgroundColor: "#141414",
+		// Theme tokens (were #141414 and rgba(230,230,230,0.35), the same values
+		// in dark mode) so the rail also sits right on Paper.
+		backgroundColor: "var(--background)",
 		backgroundImage: [
 			`linear-gradient(90deg, ${color} 0%, ${color} ${value}%, transparent ${value}%, transparent 100%)`,
 			...[30, 50, 70, 90].map(
-				() => "linear-gradient(90deg, rgba(230,230,230,0.35), rgba(230,230,230,0.35))",
+				() =>
+					"linear-gradient(90deg, color-mix(in srgb, var(--foreground) 35%, transparent), color-mix(in srgb, var(--foreground) 35%, transparent))",
 			),
 		].join(", "),
 		backgroundSize: ["100% 100%", "1px 100%", "1px 100%", "1px 100%", "1px 100%"].join(", "),

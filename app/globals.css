@@ -65,9 +65,16 @@
 	--lh-prose-leading: 1.5;
 	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
 	--lh-heading-weight: 900;
+	/* Inks that were hard-coded white before Paper existed (the mark, the
+	   IMPORTANT callout border, the plan map's strong lines). Same values as
+	   before in dark; .paper below swaps them. */
+	--lh-mark-ink: #ffffff;
+	--lh-mark-ring: rgb(148, 148, 148);
+	--lh-callout-border: #ffffff;
+	--lh-strong-line: #ffffff;
 }
 
-/* The app is always dark (<html class="dark">); mirror the same values so
+/* Dark mode (<html class="dark">, the default); mirror the same values so
    the block stays coherent under Tailwind's variant. */
 .dark {
 	--background: #141414;
@@ -100,6 +107,47 @@
 	--lh-prose-leading: 1.5;
 	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
 	--lh-heading-weight: 900;
+	--lh-mark-ink: #ffffff;
+	--lh-mark-ring: rgb(148, 148, 148);
+	--lh-callout-border: #ffffff;
+	--lh-strong-line: #ffffff;
+}
+
+/* PAPER (<html class="paper">): warm ivory paper, brown-black ink, beige
+   rules, brick-burgundy accents. Raised surfaces (cards, popovers) are
+   LIGHTER sheets on the page, the light-theme mirror of dark's raised
+   greys; muted/secondary chips sit a shade darker than the page. Defined
+   after :root so its color-scheme and tokens win on the same element. */
+.paper {
+	color-scheme: light;
+	--background: #f6f2e9;
+	--foreground: #2b2520;
+	--card: #fcf9f3;
+	--card-foreground: #2b2520;
+	--popover: #fffcf7;
+	--popover-foreground: #2b2520;
+	--primary: #8a3b2c;
+	--primary-foreground: #fcf9f3;
+	--secondary: #ede6d8;
+	--secondary-foreground: #2b2520;
+	--muted: #ede6d8;
+	--muted-foreground: #7a6d5f;
+	--accent: #e7dfcf;
+	--accent-foreground: #2b2520;
+	--destructive: #b3372a;
+	--border: #dacfbb;
+	--input: #d2c6af;
+	--ring: #a35a46;
+	--lh-ink-strong: var(--foreground);
+	--lh-ink-italic: var(--foreground);
+	--lh-mark-ink: #2b2520;
+	--lh-mark-ring: #8a3b2c;
+	--lh-callout-border: #8a3b2c;
+	--lh-strong-line: #2b2520;
+}
+
+.paper ::selection {
+	background: rgb(138 59 44 / 0.2);
 }
 
 /* CMU Serif bold (titles) — bundled local file, no CDN dependency. */
