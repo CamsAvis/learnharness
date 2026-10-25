@@ -17,6 +17,7 @@
  */
 
 import type { CallUsage, ChatRecord, JobRecord, TurnUsage } from "./contracts.ts";
+import { isSubscriptionModel } from "./acp.ts";
 
 /** Per-1M-token USD prices for one model. Fields absent where the provider
  *  doesn't bill them (cacheWrite is rare). */
@@ -1665,6 +1666,7 @@ export function callCost(
 	usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number },
 	model: string,
 ): number | null {
+	if (isSubscriptionModel(model)) return 0;
 	const price = PRICES[model];
 	if (!price) return null;
 	if (usage.inputTokens === undefined || usage.outputTokens === undefined) return null;

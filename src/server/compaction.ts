@@ -29,6 +29,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
+import { usageToCallUsage } from "../core/usage.ts";
 import {
 	activeCompactionOf,
 	buildCompactionPrompt,
@@ -234,11 +235,7 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 			model: deps.modelId,
 			steps: [
 				{
-					inputTokens: usage.input,
-					outputTokens: usage.output,
-					cacheReadTokens: usage.cacheRead,
-					cacheWriteTokens: usage.cacheWrite,
-					reasoningTokens: usage.reasoning ?? 0,
+					...usageToCallUsage(usage),
 				},
 			],
 		});

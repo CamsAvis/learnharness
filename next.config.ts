@@ -26,8 +26,9 @@ const nextConfig: NextConfig = {
 	// under their dist/ — the traced copy collapsed to a bare package.json
 	// and the packaged server died on ERR_MODULE_NOT_FOUND; openai/
 	// @anthropic-ai — pi-ai's deps — vanished from the trace entirely).
-	// Anchored "./"-prefixed forms behave the same. Only the three entries
-	// below are verified safe (complete externals trace + clean payload).
+	// Anchored "./"-prefixed forms behave the same. Keep these exclusions
+	// narrow; build-server.mjs also normalizes the generated traces because
+	// Next 16's Windows glob matching can miss these private locations.
 	// The recursive-DMG payload (repo dist/ swept into the bundle, shipping
 	// the previous build inside the next) is instead prevented by the
 	// desktop:dist clean step AND targeted post-trace curation in
@@ -55,6 +56,12 @@ const nextConfig: NextConfig = {
 	// caught it; unit tests run unbundled and never see it.
 	outputFileTracingIncludes: {
 		"*": [
+			// Prompt fragments are discovered with readdir at runtime. Static
+			// tracing sees the base prompt but misses the composed role trees.
+			"src/agent/system-prompt.md",
+			"src/agent/prompts/**/*.md",
+			"src/agent/acp/*.ps1",
+			"src/agent/acp/*.cjs",
 			// The standalone trace omitted this entire runtime-imported directory
 			// in 0.3.0, so importing puppeteer-core failed before browser startup.
 			"node_modules/@puppeteer/browsers/lib/browser-data/**/*.js",
@@ -77,6 +84,7 @@ const nextConfig: NextConfig = {
 	// The pi engine must stay external: its providers are runtime-loaded Node
 	// code (undici streams, catalog data) that breaks when bundled into routes.
 	serverExternalPackages: [
+		"cross-spawn", // ACP's Windows supervisor also requires it at runtime.
 		"@earendil-works/pi-ai",
 		"@earendil-works/pi-agent-core",
 		"pdfjs-dist", // sources v0: bundling breaks its node fake-worker path

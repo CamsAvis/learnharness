@@ -49,6 +49,7 @@ import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
+import { SubscriptionConnections } from "./subscriptions-section.tsx";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -56,6 +57,7 @@ import { KeyboardSection } from "./keyboard-section.tsx";
 const SECTIONS = [
 	{ id: "general", label: "General" },
 	{ id: "keys", label: "Keys" },
+	{ id: "subscriptions", label: "Subscriptions" },
 	{ id: "agent", label: "Agent" },
 	{ id: "appearance", label: "Appearance" },
 	{ id: "graph", label: "Graph" },
@@ -378,6 +380,11 @@ export function SettingsDialogBody({
 							{active === "keys" && (
 								<SettingsSection title="Keys" testid="section-keys">
 									<KeysSection initialRow={initialRow ?? undefined} />
+								</SettingsSection>
+							)}
+							{active === "subscriptions" && (
+								<SettingsSection title="Subscriptions" testid="section-subscriptions">
+									<SubscriptionConnections />
 								</SettingsSection>
 							)}
 							{active === "agent" && (

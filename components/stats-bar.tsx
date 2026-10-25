@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { contextWindow, sessionCost, turnCost, type ChatSettings, type TurnUsage } from "@/src/core";
+import { contextWindow, sessionCost, turnCost, isSubscriptionModel, type ChatSettings, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
 
@@ -87,7 +87,10 @@ export function StatsBar({
 	// Honest cost: show dollars only when at least one turn priced;
 	// otherwise "—" (never a fake $0.0000).
 	const pricedCount = turns.length - unpriced;
-	const costLabel = pricedCount > 0 ? formatUsd(cost) : "—";
+	const subscriptionTurns = turns.filter((turn) => isSubscriptionModel(turn.model)).length;
+	const costLabel = subscriptionTurns > 0 && subscriptionTurns === turns.length
+		? "Subscription"
+		: pricedCount > 0 ? `${formatUsd(cost)}${subscriptionTurns ? " + subscription" : ""}` : "—";
 	const lastModel = turns.at(-1)?.model;
 
 	return (
@@ -168,7 +171,7 @@ export function StatsBar({
 												</span>
 												<span className="flex shrink-0 items-center gap-2 tabular-nums text-card-foreground">
 													<span className="text-muted-foreground">{turn.steps.length} steps</span>
-													<span>{c === null ? "—" : formatUsd(c)}</span>
+													<span>{isSubscriptionModel(turn.model) ? "Subscription" : c === null ? "—" : formatUsd(c)}</span>
 												</span>
 											</li>
 										);

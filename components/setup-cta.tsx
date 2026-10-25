@@ -42,10 +42,10 @@ export function hasProviderKey(
 export function useZeroKeys(): boolean {
 	const [zeroKeys, setZeroKeys] = useState(false);
 	const read = useCallback(() => {
-		fetch("/api/keys")
-			.then((r) => r.json())
-			.then((body: { keys?: AuthKeyStatus[]; providers?: ProviderKeyInfo[] }) => {
-				setZeroKeys(!hasProviderKey(body.keys ?? [], body.providers));
+		fetch("/api/models")
+			.then((r) => { if (!r.ok) throw new Error("Model catalog unavailable"); return r.json(); })
+			.then((body: ModelCatalogResponse) => {
+				setZeroKeys(!body.providers.some((provider) => provider.keyPresent || provider.connectionReady));
 			})
 			.catch(() => {});
 	}, []);
@@ -53,7 +53,7 @@ export function useZeroKeys(): boolean {
 		read();
 	}, [read]);
 	useSettingsSaved((section) => {
-		if (section === "keys") read();
+		if (section === "keys" || section === "acp") read();
 	});
 	return zeroKeys;
 }
@@ -69,7 +69,7 @@ export function ZeroKeysPill({ onOpen, inline = false }: { onOpen: () => void; i
 			onClick={onOpen}
 			className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 		>
-			Add a provider key
+			Connect a subscription or add a key
 		</button>
 	);
 	return inline ? button : <div className="pointer-events-auto mb-2 flex justify-center">{button}</div>;
@@ -85,7 +85,7 @@ export function ZeroKeysPill({ onOpen, inline = false }: { onOpen: () => void; i
 export function strongKeyless(catalog: ModelCatalogResponse | undefined): boolean {
 	const strong = catalog?.slots.strong;
 	if (!strong) return false;
-	return !catalog.providers.some((p) => p.id === strong.model.provider && p.keyPresent);
+	return !catalog.providers.some((p) => p.id === strong.model.provider && (p.keyPresent || p.connectionReady));
 }
 
 /** The strong-slot keyless truth for the PRE-SEND guard (home / /chat/new):
@@ -95,7 +95,7 @@ export function strongKeyless(catalog: ModelCatalogResponse | undefined): boolea
 export function useStrongKeyless(): boolean {
 	const { catalog, refresh } = useModelCatalog();
 	useSettingsSaved((section) => {
-		if (section === "keys" || section === "models") refresh();
+		if (section === "keys" || section === "models" || section === "acp") refresh();
 	});
 	return strongKeyless(catalog);
 }
