@@ -1,6 +1,6 @@
 "use client";
 
-import { useContext } from "react";
+import { useContext, useState } from "react";
 import { CheckIcon, SettingsIcon, XIcon } from "lucide-react";
 import { JobsContext } from "@/components/jobs-context";
 import { ChatActionsContext } from "@/components/chat";
@@ -17,7 +17,9 @@ import { BrailleSpinner } from "@/components/braille-spinner";
  *   running     → live activity card (activity line + elapsed)
  *   done/error  → quiet one-liner ("delivered" / "failed") — the artifact
  *                 itself arrives in the steer message right below, so the
- *                 box must not duplicate it.
+ *                 box must not duplicate it. A failed (or aborted) figure
+ *                 or demo offers Retry: a new job for the same call, which
+ *                 this card then follows.
  */
 const KIND_LABEL: Record<JobKind, string> = {
 	research: "Research agent",
@@ -26,9 +28,22 @@ const KIND_LABEL: Record<JobKind, string> = {
 	pdf: "PDF reader",
 };
 
+/** The newest job for a tool call: a retry is a new job for the same
+ *  call, and the card follows it. Pure. */
+export function latestJobFor(jobs: readonly JobRecord[], toolCallId: string): JobRecord | null {
+	let latest: JobRecord | null = null;
+	for (const j of jobs) {
+		if (j.toolCallId === toolCallId && (latest === null || j.createdAt > latest.createdAt)) latest = j;
+	}
+	return latest;
+}
+
+/** The kinds the learner can retry from the card (server/jobs.ts retryJob). */
+const RETRYABLE: ReadonlySet<JobKind> = new Set(["visual", "demo"]);
+
 export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: JobKind }) {
 	const jobs = useContext(JobsContext);
-	const job = jobs.find((j) => j.toolCallId === toolCallId) ?? null;
+	const job = latestJobFor(jobs, toolCallId);
 	const label = KIND_LABEL[kind];
 
 	if (!job || job.status === "running") {
@@ -55,7 +70,39 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 			{failed ? <XIcon className="size-3.5 text-red-500" /> : <CheckIcon className="size-3.5" />}
 			<span className="font-medium uppercase tracking-wide">{label}</span>
 			<span>{failed ? "failed" : "delivered"}</span>
+			{failed && RETRYABLE.has(job.kind) && <RetryButton jobId={job.id} />}
 		</div>
+	);
+}
+
+/** Retry a failed figure or demo. On success the jobs feed brings the new
+ *  running job and this line gives way to its activity card; until then the
+ *  button stays "Retrying…" (a second click would only be refused). */
+function RetryButton({ jobId }: { jobId: string }) {
+	const [phase, setPhase] = useState<"idle" | "sending" | "sent" | "refused">("idle");
+	const busy = phase === "sending" || phase === "sent";
+	return (
+		<button
+			type="button"
+			data-testid="dispatch-retry"
+			disabled={busy}
+			onClick={async () => {
+				setPhase("sending");
+				try {
+					const res = await fetch("/api/activity/retry", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ kind: "job", id: jobId }),
+					});
+					setPhase(res.ok ? "sent" : "refused");
+				} catch {
+					setPhase("refused");
+				}
+			}}
+			className="ml-1 rounded-sm border border-border bg-card px-2 py-0.5 font-ui normal-case tracking-normal text-foreground transition-colors hover:border-muted-foreground/50 disabled:opacity-60"
+		>
+			{busy ? "Retrying…" : phase === "refused" ? "Couldn't retry. Try again" : "Retry"}
+		</button>
 	);
 }
 

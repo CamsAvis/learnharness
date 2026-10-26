@@ -68,6 +68,7 @@ import { danglingQuestionOf, endsInDismissal, type LhMessage } from "../core/nat
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
+import { isModelsRefusal, isProviderKeyRefusal } from "../core/settings.ts";
 import { connectionBackgroundAllowed, isSubscriptionProvider, onSubscriptionChange } from "../agent/subscription-connections.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import type { Agent } from "@earendil-works/pi-agent-core";
@@ -418,6 +419,39 @@ export function abortJob(jobId: string): AbortOutcome {
 		/* deliverJobResult marks the job error on unrecoverable failure */
 	});
 	return { ok: true };
+}
+
+/** retryJob's outcome: the new job, or why there is none. */
+export type RetryOutcome =
+	| { ok: true; job: JobRecord }
+	| { ok: false; reason: "not_found" | "not_retryable" | "already_running" | "not_ready" };
+
+/** The job kinds the learner can retry from their card. */
+const RETRYABLE_KINDS: ReadonlySet<JobRecord["kind"]> = new Set(["visual", "demo"]);
+
+/**
+ * Retry a failed or aborted figure or demo job (the card's Retry button):
+ * a NEW job for the same tool call, its brief re-read from the transcript
+ * the way crash recovery re-runs a job. A new job, not the same one: a
+ * job's steer id is fixed (steer_<jobId>), and its failure or abort note
+ * already holds it, so a re-run of the same job would land and be deduped
+ * away. The new job's result arrives like any other and wakes the teacher.
+ * Refusals (models or a provider key missing) aren't retryable here: their
+ * card sends the learner to setup instead.
+ */
+export function retryJob(jobId: string): RetryOutcome {
+	const job = stores.jobStore.getJob(jobId);
+	if (!job || !stores.chatStore.getChat(job.chatId)) return { ok: false, reason: "not_found" };
+	if (job.status !== "error" || !RETRYABLE_KINDS.has(job.kind) || isModelsRefusal(job.error) || isProviderKeyRefusal(job.error)) {
+		return { ok: false, reason: "not_retryable" };
+	}
+	const siblings = stores.jobStore.listJobs(job.chatId).filter((j) => j.toolCallId === job.toolCallId);
+	if (siblings.some((j) => j.status === "running")) return { ok: false, reason: "already_running" };
+	const respawn = state().respawn;
+	if (!respawn) return { ok: false, reason: "not_ready" };
+	const fresh = stores.jobStore.createJob({ kind: job.kind, chatId: job.chatId, toolCallId: job.toolCallId, activity: "retrying" });
+	respawn(fresh.id);
+	return { ok: true, job: fresh };
 }
 
 function chatIdOf(steer: SteerMessage): string {
