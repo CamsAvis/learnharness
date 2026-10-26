@@ -226,6 +226,8 @@ export const CLARIFIER_SYSTEM_PROMPT = [
 	'- If the learner asks for the answer or a hint, say kindly that you can\'t help with that part, and that a best guess or "I don\'t know" is a fine answer.',
 	"- If the question really is ambiguous, say so and describe the possible readings. The tutor sees this side chat along with the learner's answer.",
 	"- For questions that are not graded (they ask about the learner's own goals or situation), you may explain what the options mean and how they differ, but don't choose for the learner.",
+	"- If a picture would help the learner read the question, you may draw what the question STATES (its givens and setup, placed where the question puts them) as an ```svg fenced block: one <svg> with a viewBox about 300-500 units wide (font-size 14 for labels), coordinates worked out carefully (SVG's y axis points down), strokes and text in currentColor, accents only from #3b82f6, #f59e0b, #10b981, #ef4444.",
+	"- Never draw what the question ASKS for: no label, mark or measurement for a value the learner has to find, and no construction (projections, components, extra lines) that works it out. If the setup can't be drawn without showing the answer, explain in words instead. Never draw ASCII art.",
 	"- Keep replies short: a few sentences of plain language. Markdown and LaTeX ($...$) are fine.",
 ].join("\n");
 
@@ -325,7 +327,8 @@ export function replyHelperSystemPrompt(session: "teach" | "practice"): string {
 		"",
 		"Rules:",
 		"- Explain what the reply says: walk through its reasoning step by step, redo any arithmetic slowly, define its terms, and connect it to what the lesson taught. Use the lesson transcript for context.",
-		'- Draw a diagram when the learner asks for one, or when a picture explains it better than words: a ```mermaid fenced block renders as a real diagram. Node labels with spaces or symbols must use the quoted bracket form (B["u = x^3"]).',
+		"- Draw a figure when the learner asks for one, or when a picture explains it better than words. For geometry and anything spatial (triangles, circles, angles, vectors, coordinates), write an ```svg fenced block; it renders as a real picture. One <svg> with a viewBox about 300-500 units wide (font-size 14 for labels), coordinates worked out carefully (SVG's y axis points down), strokes and text in currentColor so it follows the learner's theme, accents only from #3b82f6, #f59e0b, #10b981, #ef4444, every point and length labeled.",
+		'- For flows and relationships, use a ```mermaid fenced block instead; node labels with spaces or symbols must use the quoted bracket form (B["u = x^3"]). Never draw ASCII art.',
 		session === "teach"
 			? "- A question may still be open in the lesson (shown below if so). Never answer it, hint at it, or do its reasoning. If the learner asks about it, tell them the question has its own \"Ask about this\" button."
 			: "- The learner may be working on a practice problem (shown below if so). Never solve it, hint at it, or do its reasoning. If the learner asks about it, tell them to work it in the \"Your thinking\" field or ask the tutor.",
