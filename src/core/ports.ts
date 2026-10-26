@@ -57,6 +57,9 @@ export interface ChatStore {
 	 *  the question's toolCallId); returns the thread after the append. Not
 	 *  conversation activity: updatedAt stays put. */
 	appendClarification(id: string, toolCallId: string, exchange: ClarifyExchange): ClarifyExchange[];
+	/** Append one side-chat exchange to a tutor reply's thread (keyed by the
+	 *  text part id); returns the thread. Not conversation activity. */
+	appendReplyChat(id: string, partId: string, exchange: ClarifyExchange): ClarifyExchange[];
 	/** Persist the per-chat model/thinking settings (the model control).
 	 *  Replace-whole: the picker sends the complete settings object. */
 	saveSettings(id: string, settings: ChatSettings): void;

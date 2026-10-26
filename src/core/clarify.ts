@@ -1,7 +1,9 @@
 /**
- * THE QUESTION SIDE CHAT (clarifier): while a question waits for an answer,
- * the learner can ask a separate helper what the question means. The helper
- * explains wording, terms and notation without answering the question.
+ * THE SIDE CHAT (clarifier): a separate helper the learner can ask without
+ * touching the lesson. About an open QUESTION, it explains wording, terms
+ * and notation without answering it. About one of the tutor's REPLIES (a
+ * grading, an explanation), it explains the reply in full and can draw
+ * diagrams, but never answers a question that is still open.
  *
  * Everything here is pure and browser-safe. The server runs the model call
  * (src/server/clarify.ts); the record keeps each question's thread under
@@ -16,7 +18,13 @@
 
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { ClarifyExchange } from "./contracts/chat.ts";
-import type { LhMessage } from "./native-messages.ts";
+import {
+	activeProblemOf,
+	danglingQuestionOf,
+	PRACTICE_CONCLUDE_TOOL,
+	PRACTICE_PROBLEM_TOOL,
+	type LhMessage,
+} from "./native-messages.ts";
 import { serializeForSummary } from "./compaction.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
 import { parseAskInput, parseExplainInput, parseQuizInput } from "./tool-parts.ts";
@@ -83,34 +91,100 @@ export function clarifyQuestionView(tool: string, input: unknown): ClarifyQuesti
 
 /** The note that replaces a rejected question call's error: validation
  *  errors quote the call's arguments, the intended answer included. */
-const REJECTED_QUESTION_NOTE = "(this question call was rejected; the tutor retried it)";
+const rejectedNote = (what: "question" | "problem") => `(this ${what} call was rejected; the tutor retried it)`;
+
+/** Stands in for a compaction summary that may describe a still-open
+ *  question's or problem's answer (compaction runs in the learner's pause,
+ *  and its summary records what's pending). */
+const HIDDEN_SUMMARY_NOTE =
+	"(the earlier lesson was summarized here; the summary is hidden while the question or problem it may describe is still open)";
 
 /** One message as the helper may read it: question calls reduced to their
- *  wording, and rejected question calls' errors replaced by a neutral note. */
-function withoutAnswerKey(m: LhMessage): LhMessage {
+ *  wording, rejected question and problem calls' errors (which can echo
+ *  their arguments) replaced by a neutral note, and practice problem calls
+ *  reduced to their statement unless a conclude has shown the learner the
+ *  solution (`revealed`). */
+function withoutAnswerKey(m: LhMessage, revealed: ReadonlySet<string>): LhMessage {
 	const role = (m as { role?: string }).role;
 	if (role === "toolResult") {
 		const result = m as ToolResultMessage & LhMessage;
-		if (!result.isError || !isQuestionTool(result.toolName)) return m;
-		return { ...result, content: [{ type: "text", text: REJECTED_QUESTION_NOTE }] } as LhMessage;
+		if (!result.isError) return m;
+		const what = isQuestionTool(result.toolName) ? "question" : result.toolName === PRACTICE_PROBLEM_TOOL ? "problem" : null;
+		if (!what) return m;
+		return { ...result, content: [{ type: "text", text: rejectedNote(what) }] } as LhMessage;
 	}
 	if (role !== "assistant") return m;
 	const assistant = m as AssistantMessage & LhMessage;
-	if (!assistant.content.some((b) => b.type === "toolCall" && isQuestionTool(b.name))) return m;
+	const hidden = (b: AssistantMessage["content"][number]) =>
+		b.type === "toolCall" && (isQuestionTool(b.name) || (b.name === PRACTICE_PROBLEM_TOOL && !revealed.has(b.id)));
+	if (!assistant.content.some(hidden)) return m;
 	return {
 		...assistant,
-		content: assistant.content.map((b) =>
-			b.type === "toolCall" && isQuestionTool(b.name)
+		content: assistant.content.map((b) => {
+			if (b.type !== "toolCall" || !hidden(b)) return b;
+			return isQuestionTool(b.name)
 				? { ...b, arguments: { ...clarifyQuestionView(b.name, b.arguments) } }
-				: b,
-		),
+				: { ...b, arguments: { statement: (b.arguments as { statement?: unknown } | undefined)?.statement } };
+		}),
 	} as LhMessage;
 }
+
+/** Practice problem calls whose solution the learner has seen: each one a
+ *  clean conclude revealed (the conclude card shows it), pairing with the
+ *  newest clean pose before it. Every other pose (the problem in progress,
+ *  a refused one) keeps its solution and target hidden. */
+function revealedProblemIds(messages: readonly LhMessage[]): Set<string> {
+	const clean = new Set<string>();
+	for (const m of messages) {
+		const r = m as { role?: string; isError?: boolean; toolCallId?: string };
+		if (r.role === "toolResult" && r.isError !== true && r.toolCallId) clean.add(r.toolCallId);
+	}
+	const revealed = new Set<string>();
+	let posed: string | null = null;
+	for (const m of messages) {
+		if ((m as { role?: string }).role !== "assistant") continue;
+		for (const b of (m as AssistantMessage).content) {
+			if (b.type !== "toolCall" || !clean.has(b.id)) continue;
+			if (b.name === PRACTICE_PROBLEM_TOOL) posed = b.id;
+			else if (b.name === PRACTICE_CONCLUDE_TOOL && posed) {
+				revealed.add(posed);
+				posed = null;
+			}
+		}
+	}
+	return revealed;
+}
+
+/** Where the open question or the practice problem in progress was posed
+ *  (its message index), or -1. A compaction summary written after it may
+ *  describe its answer. */
+function openPoseIndex(messages: readonly LhMessage[]): number {
+	const ids = new Set<string>();
+	const question = danglingQuestionOf(messages);
+	if (question) ids.add(question.toolCallId);
+	const problem = activeProblemOf(messages);
+	if (problem) ids.add(problem.toolCallId);
+	// The latest call with each id is the open one (legacy records reuse ids
+	// like call_0); the earliest of those bounds the summaries to hide.
+	let at = -1;
+	for (let i = messages.length - 1; i >= 0 && ids.size > 0; i--) {
+		if ((messages[i] as { role?: string }).role !== "assistant") continue;
+		for (const b of (messages[i] as AssistantMessage).content) {
+			if (b.type === "toolCall" && ids.delete(b.id)) at = i;
+		}
+	}
+	return at;
+}
+
+const isCompactionMarker = (m: LhMessage): boolean =>
+	(m as { role?: string }).role === "custom" && (m as { customType?: string }).customType === "compaction";
 
 const isQuestionTool = (name: string): boolean => (QUESTION_TOOLS as readonly string[]).includes(name);
 
 /**
- * The lesson transcript as the helper reads it: answer keys stripped, then
+ * The lesson transcript as the helper reads it: answer keys, unrevealed
+ * practice solutions and summaries written while those were open stripped,
+ * then
  * serialized, then cut to its most recent CLARIFY_CONTEXT_CHARS (at a line
  * boundary when one is near). Walks back from the newest message, so a long
  * session serializes only the tail it keeps.
@@ -119,10 +193,17 @@ export function clarifyLessonContext(messages: readonly LhMessage[], maxChars = 
 	const parts: string[] = [];
 	let size = 0;
 	let i = messages.length - 1;
+	const revealed = revealedProblemIds(messages);
+	const openAt = openPoseIndex(messages);
 	for (; i >= 0 && size <= maxChars; i--) {
+		const m = messages[i]!;
+		const readable =
+			openAt >= 0 && i > openAt && isCompactionMarker(m)
+				? ({ ...m, content: HIDDEN_SUMMARY_NOTE } as LhMessage)
+				: withoutAnswerKey(m, revealed);
 		// serializeForSummary renders each message as one block joined by a
 		// blank line, so per-message pieces join back to the same text.
-		const piece = serializeForSummary([withoutAnswerKey(messages[i]!)]);
+		const piece = serializeForSummary([readable]);
 		if (!piece) continue;
 		parts.push(piece);
 		size += piece.length + 2;
@@ -184,11 +265,17 @@ export function buildClarifyPrompt(args: {
 }
 
 /** Why a side-chat message is refused, or null when it may be sent. */
-export function clarifyRequestProblem(text: unknown, thread: readonly ClarifyExchange[]): string | null {
+export function clarifyRequestProblem(
+	text: unknown,
+	thread: readonly ClarifyExchange[],
+	subject: "question" | "reply" = "question",
+): string | null {
 	if (typeof text !== "string" || text.trim().length === 0) return "Type a question first.";
 	if (text.length > CLARIFY_MAX_CHARS) return `Keep it under ${CLARIFY_MAX_CHARS} characters.`;
 	if (thread.length >= CLARIFY_MAX_EXCHANGES)
-		return `This question already has ${CLARIFY_MAX_EXCHANGES} side-chat messages. Answer it to go on.`;
+		return subject === "question"
+			? `This question already has ${CLARIFY_MAX_EXCHANGES} side-chat messages. Answer it to go on.`
+			: `This reply already has ${CLARIFY_MAX_EXCHANGES} side-chat messages. Ask about another reply, or ask the tutor.`;
 	return null;
 }
 
@@ -200,4 +287,120 @@ export function attachClarifications<T extends { clarifications?: ClarifyExchang
 ): T {
 	const { clarifications: _client, ...rest } = answer;
 	return (thread && thread.length > 0 ? { ...rest, clarifications: [...thread] } : rest) as T;
+}
+
+// ─── side chats about the tutor's replies ────────────────────────────────────
+
+/** A reply chat's id: the tutor text part it's about (view.ts textPartId,
+ *  `<native message id>-t<n>`, the nth text block of that message). */
+export const REPLY_CHAT_ID = /^(.{1,200})-t(\d{1,4})$/;
+
+export interface ReplyPassage {
+	/** The native assistant message the text belongs to. */
+	messageId: string;
+	text: string;
+}
+
+/** The tutor text a reply chat is about, or null when the id doesn't point
+ *  at a non-empty text block of an assistant message. */
+export function replyPassageOf(messages: readonly LhMessage[], partId: string): ReplyPassage | null {
+	const match = REPLY_CHAT_ID.exec(partId);
+	if (!match) return null;
+	const messageId = match[1]!;
+	const index = Number(match[2]);
+	const message = messages.find(
+		(m) => (m as { id?: string }).id === messageId && (m as { role?: string }).role === "assistant",
+	) as (AssistantMessage & LhMessage) | undefined;
+	if (!message) return null;
+	const block = message.content.filter((b) => b.type === "text")[index];
+	return block && block.type === "text" && block.text.trim() ? { messageId, text: block.text } : null;
+}
+
+/** The reply helper's standing instructions. A practice session has no
+ *  open questions but may have a problem in progress (never solved for the
+ *  learner), and no answers to carry the chat to the tutor. */
+export function replyHelperSystemPrompt(session: "teach" | "practice"): string {
+	return [
+		"You are the side-chat helper in a tutoring app. The learner is asking about one of the tutor's replies, shown below (often the tutor's grading of their answer). Help them understand it.",
+		"",
+		"Rules:",
+		"- Explain what the reply says: walk through its reasoning step by step, redo any arithmetic slowly, define its terms, and connect it to what the lesson taught. Use the lesson transcript for context.",
+		'- Draw a diagram when the learner asks for one, or when a picture explains it better than words: a ```mermaid fenced block renders as a real diagram. Node labels with spaces or symbols must use the quoted bracket form (B["u = x^3"]).',
+		session === "teach"
+			? "- A question may still be open in the lesson (shown below if so). Never answer it, hint at it, or do its reasoning. If the learner asks about it, tell them the question has its own \"Ask about this\" button."
+			: "- The learner may be working on a practice problem (shown below if so). Never solve it, hint at it, or do its reasoning. If the learner asks about it, tell them to work it in the \"Your thinking\" field or ask the tutor.",
+		...(session === "teach" ? ["- The tutor sees this side chat along with the learner's next answer."] : []),
+		"- Keep replies focused: short paragraphs. Markdown and LaTeX ($...$) are fine.",
+	].join("\n");
+}
+
+/** The reply helper's instructions in a teaching session. */
+export const REPLY_HELPER_SYSTEM_PROMPT = replyHelperSystemPrompt("teach");
+
+/** The reply helper's one-shot prompt: lesson context, the reply, any open
+ *  question (wording only) or practice problem in progress (its statement),
+ *  the side chat so far, and the new message. */
+export function buildReplyChatPrompt(args: {
+	lesson: string;
+	reply: string;
+	openQuestion: ClarifyQuestionView | null;
+	openProblem?: string | null;
+	thread: readonly ClarifyExchange[];
+	asked: string;
+}): string {
+	const lines: string[] = ["## The lesson so far (most recent part)", "", args.lesson || "(nothing yet)", ""];
+	lines.push("## The tutor's reply the learner is asking about", "", args.reply, "");
+	const q = args.openQuestion;
+	if (q) {
+		lines.push("## A question still open in the lesson (never answer it)", "", q.question);
+		if (q.details) lines.push("", q.details);
+		if (q.options) lines.push("", "Options:", ...q.options.map((o) => `- ${o}`));
+		lines.push("");
+	}
+	if (args.openProblem) {
+		lines.push("## The practice problem the learner is working on (never solve it)", "", args.openProblem, "");
+	}
+	if (args.thread.length > 0) {
+		lines.push("## Side chat so far", "");
+		for (const ex of args.thread) lines.push(`Learner: ${ex.asked}`, "", `You: ${ex.reply}`, "");
+	}
+	lines.push("## The learner now asks", "", args.asked);
+	return lines.join("\n");
+}
+
+/** When the learner last answered or skipped a question (ms), or 0. A
+ *  rejected question call (an error result) isn't an answer, and a typed
+ *  message carries no side chats, so neither moves the mark. */
+function lastAnswerAt(messages: readonly LhMessage[]): number {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i] as { role?: string; toolName?: string; isError?: boolean; timestamp?: unknown };
+		if (m.role === "toolResult" && m.isError !== true && isQuestionTool(m.toolName ?? "")) {
+			return typeof m.timestamp === "number" ? m.timestamp : 0;
+		}
+	}
+	return 0;
+}
+
+/** The reply-chat exchanges since the learner's last answer, oldest first:
+ *  what they asked about the tutor's replies before this one. */
+export function replyChatsSince(record: {
+	messages: readonly LhMessage[];
+	replyChats?: Record<string, ClarifyExchange[]>;
+}): ClarifyExchange[] {
+	if (!record.replyChats) return [];
+	const since = lastAnswerAt(record.messages);
+	return Object.values(record.replyChats)
+		.flat()
+		.filter((ex) => Date.parse(ex.at) > since)
+		.sort((a, b) => a.at.localeCompare(b.at));
+}
+
+/** The answer with the reply chats attached (replacing any the client sent).
+ *  None → the field is removed. */
+export function attachReplyChats<T extends { replyChats?: ClarifyExchange[] }>(
+	answer: T,
+	exchanges: readonly ClarifyExchange[],
+): T {
+	const { replyChats: _client, ...rest } = answer;
+	return (exchanges.length > 0 ? { ...rest, replyChats: [...exchanges] } : rest) as T;
 }

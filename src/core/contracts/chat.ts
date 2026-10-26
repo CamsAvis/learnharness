@@ -56,6 +56,10 @@ export interface ChatRecord {
 	 *  open question before answering it, keyed by the question's toolCallId.
 	 *  The answer copies its thread when it lands, so the teacher reads it. */
 	clarifications?: Record<string, ClarifyExchange[]>;
+	/** Side chats about the tutor's replies, keyed by the text part asked
+	 *  about (`<message id>-t<n>`). The next answer carries the exchanges
+	 *  made since the learner's previous answer. */
+	replyChats?: Record<string, ClarifyExchange[]>;
 	/** The learner's private highlights and notes on this lesson's text.
 	 *  A sibling field like `turns`: nothing rides inside messages. Never
 	 *  sent to the model and never part of extraction. Absent = none. */

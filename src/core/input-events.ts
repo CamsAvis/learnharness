@@ -39,11 +39,16 @@ import {
 	pendingProblemDismissalOf,
 } from "./native-messages.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
-import { attachClarifications } from "./clarify.ts";
+import { attachClarifications, attachReplyChats, replyChatsSince } from "./clarify.ts";
 import type { ClarifyExchange } from "./contracts/chat.ts";
 
 /** The record fields the input seams read. */
-type InputRecord = { messages: LhMessage[]; kind?: string; clarifications?: Record<string, ClarifyExchange[]> };
+type InputRecord = {
+	messages: LhMessage[];
+	kind?: string;
+	clarifications?: Record<string, ClarifyExchange[]>;
+	replyChats?: Record<string, ClarifyExchange[]>;
+};
 
 /** One client-originated input event (the POST body's `input`). */
 export type ChatInput =
@@ -152,10 +157,11 @@ export function dismissAppends(record: InputRecord, input: DismissInput): LhMess
 	return [newAnswerResult(input.toolCallId, pending.tool, answerWithSideChat(record, input.toolCallId, input.answer))];
 }
 
-/** The answer carrying the question's saved side chat: the record is the
- *  source, so a client can neither drop nor invent exchanges. */
+/** The answer carrying the question's saved side chat and the reply chats
+ *  since the learner's last answer: the record is the source, so a client
+ *  can neither drop nor invent exchanges. */
 function answerWithSideChat(record: InputRecord, toolCallId: string, answer: QuestionAnswerData): QuestionAnswerData {
-	return attachClarifications(answer, record.clarifications?.[toolCallId]);
+	return attachReplyChats(attachClarifications(answer, record.clarifications?.[toolCallId]), replyChatsSince(record));
 }
 
 /** A malformed input event (the honest 400 — the orphan-trap discipline). */

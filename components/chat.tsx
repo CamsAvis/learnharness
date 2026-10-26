@@ -56,7 +56,8 @@ import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog"
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
-import { ClarifierPanel, useClarifier } from "@/components/question-clarifier";
+import { ClarifierPanel, useClarifier, type ClarifierState } from "@/components/question-clarifier";
+import { AskAboutReply } from "@/components/ask-about-reply";
 import { cn } from "@/lib/utils";
 import { SessionFind } from "@/components/session-find";
 import { HighlightLayer, HighlightsChip, useLessonHighlights } from "@/components/lesson-highlights";
@@ -890,6 +891,29 @@ export function Chat({
 	// guess so the static paint has a sane tail. The first layout effect
 	// replaces it with the measured truth before paint.
 	const [dockReserve, setDockReserve] = useState(208);
+	// The tutor reply (text part id) the learner opened a side chat about
+	// ("Ask about this" under a reply); the dock shows it.
+	const [replyChatId, setReplyChatId] = useState<string | null>(null);
+	const closeReplyChat = useCallback(() => setReplyChatId(null), []);
+	// A tutor passage can be asked about once it's in the saved record (the
+	// server reads it from there): the same set highlights use. The latest
+	// one keeps its "Ask about this" visible, also while the next reply
+	// streams in.
+	const replyAskable = useCallback(
+		(partId: string | undefined): partId is string => !!partId && highlightAnchors.has(teacherTextAnchor(partId)),
+		[highlightAnchors],
+	);
+	const latestReplyPartId = useMemo(() => {
+		for (let mi = messages.length - 1; mi >= 0; mi--) {
+			const m = messages[mi]!;
+			if (m.role !== "assistant") continue;
+			for (let pi = m.parts.length - 1; pi >= 0; pi--) {
+				const part = m.parts[pi]!;
+				if (part.type === "text" && replyAskable(part.id)) return part.id;
+			}
+		}
+		return null;
+	}, [messages, replyAskable]);
 	const syncTurns = useCallback(async () => {
 		try {
 			const res = await fetch(`/api/chats/${chatId}`);
@@ -1512,15 +1536,26 @@ export function Chat({
 													case "text": {
 														const sourceId = textPartMessageId(part.id);
 														const anchor = sourceId && sourceTextParts.get(sourceId) === part.id ? messageAnchorId(sourceId) : undefined;
+														// A saved passage can be asked about (side chat). The button
+														// sits outside the highlight anchor so it never enters a quote.
+														const askable = replyAskable(part.id);
 														return (
-															<div
-																key={part.id || pi}
-																id={anchor}
-																data-source-message-id={sourceId ?? undefined}
-																data-hl-anchor={part.id ? teacherTextAnchor(part.id) : undefined}
-																className="lh-source-passage"
-															>
-																<MessageResponse>{part.text}</MessageResponse>
+															<div key={part.id || pi} className="group/reply">
+																<div
+																	id={anchor}
+																	data-source-message-id={sourceId ?? undefined}
+																	data-hl-anchor={part.id ? teacherTextAnchor(part.id) : undefined}
+																	className="lh-source-passage"
+																>
+																	<MessageResponse>{part.text}</MessageResponse>
+																</div>
+																{askable && (
+																	<AskAboutReply
+																		active={replyChatId === part.id}
+																		alwaysVisible={part.id === latestReplyPartId}
+																		onAsk={() => setReplyChatId((open) => (open === part.id ? null : part.id!))}
+																	/>
+																)}
 															</div>
 														);
 													}
@@ -1653,6 +1688,7 @@ export function Chat({
 				<DockOverlay
 					pending={pending}
 					practice={activeProblem}
+					practiceSession={kind === "practice"}
 					compactionRunning={compacting}
 					onSubmitThinking={submitThinking}
 					chatId={chatId}
@@ -1667,6 +1703,8 @@ export function Chat({
 					pricing={pricing}
 					onReserve={setDockReserve}
 					onClarified={syncTurns}
+					replyChatId={replyChatId}
+					onCloseReplyChat={closeReplyChat}
 					dictationSlot={<DictationBar dictation={dictation} />}
 					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
@@ -1899,6 +1937,7 @@ export function shouldStampGeometryMute(nextH: number, prevH: number, pending: b
 function DockOverlay({
 	pending,
 	practice,
+	practiceSession = false,
 	compactionRunning,
 	onSubmitThinking,
 	requiresReveal,
@@ -1919,6 +1958,8 @@ function DockOverlay({
 	setupCta,
 	queuedSteers,
 	onClarified,
+	replyChatId = null,
+	onCloseReplyChat,
 }: {
 	pending: ReturnType<typeof findPendingToolCall>;
 	/** Compaction running for this chat (round 14) — the docks' submit
@@ -1928,6 +1969,9 @@ function DockOverlay({
 	 *  {toolCallId, input} — dock ownership exactly like a pending
 	 *  question (the composer is replaced); null in teaching sessions. */
 	practice: { toolCallId: string; input: unknown } | null;
+	/** A practice session: no question answers, so reply chats never reach
+	 *  the tutor (the panel says so). */
+	practiceSession?: boolean;
 	/** (commit, text) — the practice dock's two submit lanes. */
 	onSubmitThinking: (text: string) => void;
 	/** Teach-phase pending question: arrives collapsed behind the reveal button (W5). */
@@ -1968,6 +2012,12 @@ function DockOverlay({
 	setupCta?: React.ReactNode;
 	/** A side-chat reply landed (its usage is in the record now). */
 	onClarified?: () => void;
+	/** The tutor reply (text part id) the learner opened a side chat about
+	 *  from the transcript; null = none. */
+	replyChatId?: string | null;
+	/** Close that reply chat (the panel's ✕, Esc, or switching to the
+	 *  question's own side chat). */
+	onCloseReplyChat?: () => void;
 }) {
 	const { isAtBottom, scrollToBottom, scrollRef } = useStickToBottomContext();
 	// Render-fresh bottom state (flicker round): the arrival block below reads
@@ -1987,8 +2037,32 @@ function DockOverlay({
 
 	const pendingId = pending?.toolCallId ?? null;
 	const initialPendingRef = useRef(pendingId);
-	// The open question's side chat (question-clarifier.tsx).
-	const clarifier = useClarifier(chatId, pendingId, onClarified);
+	// The side chats (question-clarifier.tsx): one about the open question,
+	// one about the tutor reply picked in the transcript. One shows at a
+	// time; a reply chat wins while it's open, and opening it closes the
+	// question's.
+	const questionChat = useClarifier(chatId, pendingId ? { kind: "question", id: pendingId } : null, onClarified);
+	const replyChatState = useClarifier(chatId, replyChatId ? { kind: "reply", id: replyChatId } : null, onClarified, {
+		focusOnTarget: true,
+		tutorSees: !practiceSession,
+	});
+	const replyChat: ClarifierState | null = replyChatId
+		? {
+				...replyChatState,
+				open: true,
+				setOpen: (next: boolean) => {
+					if (!next) onCloseReplyChat?.();
+				},
+			}
+		: null;
+	const closeQuestionChat = questionChat.setOpen;
+	useEffect(() => {
+		if (replyChatId) closeQuestionChat(false);
+	}, [replyChatId, closeQuestionChat]);
+	const activeChat = replyChat ?? (questionChat.open ? questionChat : null);
+	// The chat a closing split panel keeps showing while it slides away.
+	const lingerChatRef = useRef<ClarifierState | null>(null);
+	if (activeChat) lingerChatRef.current = activeChat;
 
 	// Teach-question ARRIVAL state, applied during render — BEFORE the
 	// first paint (owner, scroll-honesty round 2026-09-25). Until now the
@@ -2134,7 +2208,9 @@ function DockOverlay({
 	// chained for free). Internal scrollers — the question area, textarea
 	// overflow, the model menus — keep native scrolling, including their
 	// own edge chaining; only when nothing under the cursor can take the
-	// delta do we forward it to the transcript.
+	// delta do we forward it to the transcript. A box that contains its
+	// overscroll (the floating side chat) keeps the wheel, as it would
+	// natively: nothing behind it scrolls.
 	useEffect(() => {
 		const root = blockRef.current;
 		const el = scrollRef.current;
@@ -2146,7 +2222,10 @@ function DockOverlay({
 		const onWheel = (e: WheelEvent) => {
 			if (e.deltaY === 0) return;
 			for (let n = e.target as HTMLElement | null; n && n !== root; n = n.parentElement) {
-				if (n instanceof HTMLElement && canScroll(n, e.deltaY)) return; // native
+				if (!(n instanceof HTMLElement)) continue;
+				if (canScroll(n, e.deltaY)) return; // native
+				const overscroll = getComputedStyle(n).overscrollBehaviorY;
+				if (overscroll === "contain" || overscroll === "none") return; // contained
 			}
 			e.preventDefault();
 			el.scrollTop += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1);
@@ -2285,10 +2364,12 @@ function DockOverlay({
 
 	// The side chat's placement. The band width comes from the flank measure
 	// above (flankW = width / 2 - DOCK_W / 2 - 2 * MARGIN_GAP).
-	const placement = pending
-		? clarifierPlacement(clarifier.open, revealPending, flankW * 2 + DOCK_W + 4 * MARGIN_GAP)
+	const placement = activeChat
+		? clarifierPlacement(true, activeChat === questionChat && revealPending, flankW * 2 + DOCK_W + 4 * MARGIN_GAP)
 		: null;
 	const split = placement === "split";
+	// A narrow band's reply chat height (above the shell), or null.
+	const replyAboveH = placement === "inline" && replyChat && dockMaxH ? Math.round(dockMaxH * 0.45) : null;
 	// The split panel renders while split, and lingers through the slide
 	// back after closing. Once a slide settles, the band is re-measured:
 	// the question reflows to its new width inside the CSS transition,
@@ -2393,6 +2474,18 @@ function DockOverlay({
 					    teach-phase check waits — the same cue that collapses it. It
 					    claims dictated speech until the learner reveals the check
 					    (the dock reclaims then). Rides the check answer on submit. */}
+					{/* A reply chat on a narrow band: above the chat box or question
+					    (the question card folds to a bar while the learner reads
+					    back, so it can't hold this one). It takes a fixed share of
+					    the column, and the shell below gives that room up. */}
+					{replyAboveH !== null && replyChat && (
+						<ClarifierPanel
+							state={replyChat}
+							variant="side"
+							className="pointer-events-auto mb-2 overflow-hidden"
+							style={{ maxHeight: replyAboveH }}
+						/>
+					)}
 					{pending && requiresReveal && (
 						<ReadingThinkingField
 							value={readingThinking}
@@ -2410,7 +2503,18 @@ function DockOverlay({
 							claim={revealPending}
 						/>
 					)}
-					<div ref={shellRef} className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
+					<div
+						ref={shellRef}
+						className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg"
+						// With a reply chat above, the question area's cap shrinks by
+						// the panel (and its gap) and keeps 15rem for the answer row,
+						// as the inline question chat does: the dock stays on screen.
+						style={
+							replyAboveH !== null && dockMaxH
+								? ({ "--dock-max-h": `max(8rem, ${dockMaxH - replyAboveH - 8}px - 15rem)` } as React.CSSProperties)
+								: undefined
+						}
+					>
 						<div
 						ref={contentRef}
 						key={mode}
@@ -2429,19 +2533,27 @@ function DockOverlay({
 									// the server swaps in the record's copy (the source of truth).
 									onSubmit={(output) =>
 										onSubmitAnswer(
-											clarifier.thread.length > 0 ? { ...output, clarifications: clarifier.thread } : output,
+											questionChat.thread.length > 0 ? { ...output, clarifications: questionChat.thread } : output,
 										)
 									}
 									onEscape={dictationCancel}
 									dictationClaim={!revealPending}
 									compactionRunning={compactionRunning}
 									clarify={{
-										count: clarifier.thread.length,
-										open: clarifier.open,
-										onToggle: () => clarifier.setOpen(!clarifier.open),
+										count: questionChat.thread.length,
+										open: activeChat === questionChat,
+										onToggle: () => {
+											if (activeChat === questionChat) questionChat.setOpen(false);
+											else {
+												onCloseReplyChat?.();
+												questionChat.setOpen(true);
+											}
+										},
 									}}
 									clarifyInline={
-										placement === "inline" ? <ClarifierPanel state={clarifier} variant="inline" /> : undefined
+										placement === "inline" && activeChat === questionChat ? (
+											<ClarifierPanel state={questionChat} variant="inline" />
+										) : undefined
 									}
 								/>
 							) : practice ? (
@@ -2470,29 +2582,29 @@ function DockOverlay({
 					    taller than the column), over the lesson's right half only:
 					    the band itself stays the question's height, so the lesson
 					    above the question stays readable. It stays open while the
-					    question folds, so the lesson can be re-read mid-conversation. */}
-					{pending && (
-						<div
-							aria-hidden={!split}
-							data-testid="clarifier-column"
-							className={cn(
-								"relative min-w-0 basis-0 transition-[flex-grow,margin,opacity] duration-300 ease-out",
-								split ? "ml-4 grow opacity-100" : "ml-0 grow-0 opacity-0",
-							)}
-						>
-							{(split || splitLingers) && (
-								<ClarifierPanel
-									state={clarifier}
-									variant="side"
-									className="pointer-events-auto absolute inset-x-0 bottom-0 overflow-hidden"
-									style={{
-										minHeight: dockMaxH ? `max(100%, ${Math.round(dockMaxH / 2)}px)` : "100%",
-										maxHeight: dockMaxH ? dockMaxH - 40 : undefined,
-									}}
-								/>
-							)}
-						</div>
-					)}
+					    question folds, so the lesson can be re-read mid-conversation.
+					    A reply chat uses the same column, beside the chat box when no
+					    question is open. */}
+					<div
+						aria-hidden={!split}
+						data-testid="clarifier-column"
+						className={cn(
+							"relative min-w-0 basis-0 transition-[flex-grow,margin,opacity] duration-300 ease-out",
+							split ? "ml-4 grow opacity-100" : "ml-0 grow-0 opacity-0",
+						)}
+					>
+						{(split || splitLingers) && lingerChatRef.current && (
+							<ClarifierPanel
+								state={activeChat ?? lingerChatRef.current}
+								variant="side"
+								className="pointer-events-auto absolute inset-x-0 bottom-0 overflow-hidden"
+								style={{
+									minHeight: dockMaxH ? `max(100%, ${Math.round(dockMaxH / 2)}px)` : "100%",
+									maxHeight: dockMaxH ? dockMaxH - 40 : undefined,
+								}}
+							/>
+						)}
+					</div>
 					</div>
 					{/* The stats row: beneath the composer/question shell, not
 					    flush to the screen bottom — static height, outside the

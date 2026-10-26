@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUpIcon, XIcon } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
@@ -8,18 +8,36 @@ import { cn } from "@/lib/utils";
 import { CLARIFY_MAX_CHARS, CLARIFY_MAX_EXCHANGES, type ClarifyExchange } from "@/src/core";
 
 /**
- * THE QUESTION SIDE CHAT: while a question waits, the learner can ask a
- * separate helper what it means ("what do you mean by X?") before
- * answering. The helper explains wording and terms, never the answer; the
- * thread is saved per question and rides the answer to the teacher.
+ * THE SIDE CHAT: a separate helper the learner can ask without touching
+ * the lesson. About an open QUESTION ("what do you mean by X?"), it explains
+ * wording and terms, never the answer; about one of the tutor's REPLIES
+ * (a grading, an explanation), it explains the reply in full and can draw
+ * diagrams. Threads are saved per target and ride the next answer to the
+ * teacher.
  *
- * useClarifier owns the thread for the open question (loaded from the
- * record, so it survives reloads); ClarifierPanel renders it. The dock
- * opens the panel beside the question on wide screens (the two share the
- * width), inline in the question card on narrow ones.
+ * useClarifier owns one target's thread (loaded from the record, so it
+ * survives reloads); ClarifierPanel renders it. The dock opens the panel
+ * beside the question or chat box on wide screens (the two share the
+ * width), inline on narrow ones.
  */
 
+/** What a side chat is about: an open question (its toolCallId) or a tutor
+ *  reply (its text part id). */
+export type SideChatTarget = { kind: "question" | "reply"; id: string };
+
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+/** The query/body field that names a target on the clarify endpoint. */
+const targetField = (target: SideChatTarget) => (target.kind === "question" ? "toolCallId" : "replyId");
+
 export interface ClarifierState {
+	/** What this side chat is about (shapes the panel's wording). */
+	kind: SideChatTarget["kind"];
+	/** The target's identity ("kind:id"), or null: a change re-checks focus. */
+	targetKey: string | null;
+	/** The tutor reads this chat with the learner's next answer. False for
+	 *  reply chats in practice sessions, which have no answers to carry it. */
+	tutorSees: boolean;
 	thread: ClarifyExchange[];
 	/** The learner's message while its reply is being written. */
 	pendingAsk: string | null;
@@ -40,8 +58,19 @@ export interface ClarifierState {
 	ask: (text: string) => Promise<void>;
 }
 
-/** The side chat for the open question (toolCallId null = none open). */
-export function useClarifier(chatId: string, toolCallId: string | null, onReplied?: () => void): ClarifierState {
+/** The side chat for one target (null = none). `focusOnTarget`: a new
+ *  target asks for focus (reply chats open on the learner's click).
+ *  `tutorSees: false`: the panel says the tutor won't see the chat. */
+export function useClarifier(
+	chatId: string,
+	target: SideChatTarget | null,
+	onReplied?: () => void,
+	options: { focusOnTarget?: boolean; tutorSees?: boolean } = {},
+): ClarifierState {
+	const key = target ? `${target.kind}:${target.id}` : null;
+	const targetRef = useRef(target);
+	targetRef.current = target;
+	const focusOnTarget = options.focusOnTarget === true;
 	const [thread, setThread] = useState<ClarifyExchange[]>([]);
 	const [pendingAsk, setPendingAsk] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -53,10 +82,10 @@ export function useClarifier(chatId: string, toolCallId: string | null, onReplie
 	const toggledRef = useRef(false);
 	const askedRef = useRef(false);
 	const focusRef = useRef(false);
-	// The question the in-flight request belongs to: a reply that lands
-	// after the question changed must not paint onto the next one.
-	const currentRef = useRef(toolCallId);
-	currentRef.current = toolCallId;
+	// The target the in-flight request belongs to: a reply that lands after
+	// the target changed must not paint onto the next one.
+	const currentRef = useRef(key);
+	currentRef.current = key;
 	const abortRef = useRef<AbortController | null>(null);
 	const onRepliedRef = useRef(onReplied);
 	onRepliedRef.current = onReplied;
@@ -69,17 +98,17 @@ export function useClarifier(chatId: string, toolCallId: string | null, onReplie
 		setDraft("");
 		toggledRef.current = false;
 		askedRef.current = false;
-		focusRef.current = false;
-		if (!toolCallId) return;
+		const current = targetRef.current;
+		if (!key || !current) return;
 		const ctrl = new AbortController();
 		void (async () => {
 			try {
-				const res = await fetch(`/api/chats/${chatId}/clarify?toolCallId=${encodeURIComponent(toolCallId)}`, {
+				const res = await fetch(`/api/chats/${chatId}/clarify?${targetField(current)}=${encodeURIComponent(current.id)}`, {
 					signal: ctrl.signal,
 				});
 				if (!res.ok) return;
 				const body = (await res.json()) as { thread?: ClarifyExchange[] };
-				if (currentRef.current !== toolCallId || !Array.isArray(body.thread) || askedRef.current) return;
+				if (currentRef.current !== key || !Array.isArray(body.thread) || askedRef.current) return;
 				setThread(body.thread);
 				// A question that already has a side chat reopens with it.
 				if (body.thread.length > 0 && !toggledRef.current) setOpenState(true);
@@ -89,10 +118,20 @@ export function useClarifier(chatId: string, toolCallId: string | null, onReplie
 		})();
 		return () => {
 			ctrl.abort();
-			abortRef.current?.abort();
+			// A question's reply can't be saved once the question changes (it
+			// was answered), so stop paying for it. A reply chat's still saves:
+			// closing or switching the panel lets it finish, and reopening that
+			// reply shows it.
+			if (current.kind === "question") abortRef.current?.abort();
 			abortRef.current = null;
 		};
-	}, [chatId, toolCallId]);
+	}, [chatId, key]);
+
+	// A new target's focus request is set in a layout effect: those run
+	// before the panel's own mount effect, which takes the request.
+	useIsoLayoutEffect(() => {
+		focusRef.current = focusOnTarget && key !== null;
+	}, [key, focusOnTarget]);
 
 	const setOpen = useCallback((next: boolean) => {
 		toggledRef.current = true;
@@ -110,7 +149,8 @@ export function useClarifier(chatId: string, toolCallId: string | null, onReplie
 		async (text: string): Promise<void> => {
 			const asked = text.trim();
 			const id = currentRef.current;
-			if (!asked || !id || abortRef.current) return;
+			const current = targetRef.current;
+			if (!asked || !id || !current || abortRef.current) return;
 			const ctrl = new AbortController();
 			abortRef.current = ctrl;
 			askedRef.current = true;
@@ -121,18 +161,20 @@ export function useClarifier(chatId: string, toolCallId: string | null, onReplie
 				const res = await fetch(`/api/chats/${chatId}/clarify`, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ toolCallId: id, text: asked }),
+					body: JSON.stringify({ [targetField(current)]: current.id, text: asked }),
 					signal: ctrl.signal,
 				});
 				const body = (await res.json().catch(() => ({}))) as { thread?: ClarifyExchange[]; error?: string };
+				const replied = res.ok && Array.isArray(body.thread);
+				// Its usage is in the record now, even if the panel moved on.
+				if (replied) onRepliedRef.current?.();
 				if (currentRef.current !== id) return;
-				if (!res.ok || !Array.isArray(body.thread)) {
+				if (!replied) {
 					setError(body.error ?? `The side chat failed (${res.status}).`);
 					return;
 				}
-				setThread(body.thread);
+				setThread(body.thread!);
 				sent = true;
-				onRepliedRef.current?.();
 			} catch (err) {
 				if (currentRef.current === id && !(err instanceof DOMException && err.name === "AbortError"))
 					setError("Couldn't reach the server. Try again.");
@@ -149,7 +191,7 @@ export function useClarifier(chatId: string, toolCallId: string | null, onReplie
 		[chatId],
 	);
 
-	return { thread, pendingAsk, error, open, setOpen, takeFocus, draft, setDraft, ask };
+	return { kind: target?.kind ?? "question", targetKey: key, tutorSees: options.tutorSees !== false, thread, pendingAsk, error, open, setOpen, takeFocus, draft, setDraft, ask };
 }
 
 export function ClarifierPanel({
@@ -164,16 +206,17 @@ export function ClarifierPanel({
 	className?: string;
 	style?: React.CSSProperties;
 }) {
-	const { thread, pendingAsk, error, ask, setOpen, takeFocus, draft, setDraft } = state;
+	const { kind, targetKey, tutorSees, thread, pendingAsk, error, ask, setOpen, takeFocus, draft, setDraft } = state;
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const listRef = useRef<HTMLDivElement>(null);
 	const full = thread.length >= CLARIFY_MAX_EXCHANGES;
 	const busy = pendingAsk !== null;
 
-	// Opening the panel (the learner's click) puts the cursor in it.
+	// Opening the panel (the learner's click), or switching it to another
+	// reply, puts the cursor in it.
 	useEffect(() => {
 		if (takeFocus()) inputRef.current?.focus({ preventScroll: true });
-	}, [takeFocus]);
+	}, [takeFocus, targetKey]);
 	// Keep the newest message in view: the list scrolls itself; inline, the
 	// question area scrolls just enough to show the input. Only that one
 	// container moves (scrollIntoView would also shift the dock's
@@ -212,13 +255,19 @@ export function ClarifierPanel({
 			}}
 			className={cn(
 				"flex min-h-0 flex-col",
-				variant === "side" ? "rounded-2xl border bg-card shadow-lg" : "mb-3 rounded-xl border border-border/70 bg-background/60",
+				// The side card floats over the lesson: the wheel anywhere on it
+				// stays with it (the dock's wheel forwarding honors containment).
+				variant === "side"
+					? "overscroll-contain rounded-2xl border bg-card shadow-lg"
+					: "mb-3 rounded-xl border border-border/70 bg-background/60",
 				className,
 			)}
 			style={style}
 		>
 			<div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
-				<span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">About this question</span>
+				<span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+					{kind === "question" ? "About this question" : "About this reply"}
+				</span>
 				<button
 					type="button"
 					aria-label="Close the side chat"
@@ -230,12 +279,20 @@ export function ClarifierPanel({
 			</div>
 			<div
 				ref={listRef}
-				className={cn("flex min-h-0 flex-col gap-2.5 overflow-y-auto px-3 pb-2 text-sm", variant === "inline" ? "max-h-56" : "flex-1")}
+				className={cn(
+					// overscroll-contain: reaching the top or bottom must not hand the
+					// wheel on to the lesson behind the panel.
+					"flex min-h-0 flex-col gap-2.5 overflow-y-auto overscroll-contain px-3 pb-2 text-sm",
+					variant === "inline" ? "max-h-56" : "flex-1",
+				)}
 			>
 				{thread.length === 0 && !busy && (
 					<p className="text-xs text-muted-foreground">
-						Ask what a word, symbol or part of the question means. This helper won&apos;t give you the answer, and your tutor
-						sees this chat along with your answer.
+						{kind === "question"
+							? "Ask what a word, symbol or part of the question means. This helper won't give you the answer, and your tutor sees this chat along with your answer."
+							: tutorSees
+								? "Ask about this reply: a step, the arithmetic, a term. It can draw a diagram if you ask, and your tutor sees this chat along with your next answer."
+								: "Ask about this reply: a step, the arithmetic, a term. It can draw a diagram if you ask. Your tutor doesn't see this chat in practice sessions."}
 					</p>
 				)}
 				{thread.map((ex, i) => (
@@ -270,7 +327,9 @@ export function ClarifierPanel({
 								void send();
 							}
 						}}
-						placeholder={full ? "That's the limit for this question." : "What do you mean by…?"}
+						placeholder={
+							full ? `That's the limit for this ${kind}.` : kind === "question" ? "What do you mean by…?" : "Why…? Can you show…?"
+						}
 						rows={1}
 						className="field-sizing-content lh-input max-h-32 min-h-9 w-full resize-none bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground/70"
 					/>

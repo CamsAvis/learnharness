@@ -84,7 +84,7 @@ function listChats(): ChatSummary[] {
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getChat(f.slice(0, -5)))
 			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, highlights: _highlights, clarifications: _clarifications, ...summary }) => {
+			.map(({ messages, tree, turns, extractions, highlights: _highlights, clarifications: _clarifications, replyChats: _replyChats, ...summary }) => {
 				// Per-record isolation (Wave B): a record whose messages fail the
 				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
 				// zero-back-compat wipe makes these "corrupt") must not blank the
@@ -163,6 +163,17 @@ function appendClarification(id: string, toolCallId: string, exchange: ClarifyEx
 	if (!record) throw new Error(`Chat not found: ${id}`);
 	const thread = [...(record.clarifications?.[toolCallId] ?? []), exchange];
 	record.clarifications = { ...record.clarifications, [toolCallId]: thread };
+	writeChat(record);
+	return thread;
+}
+
+/** Append one side-chat exchange to a tutor reply's thread. Like
+ * appendClarification, not conversation activity: updatedAt stays put. */
+function appendReplyChat(id: string, partId: string, exchange: ClarifyExchange): ClarifyExchange[] {
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	const thread = [...(record.replyChats?.[partId] ?? []), exchange];
+	record.replyChats = { ...record.replyChats, [partId]: thread };
 	writeChat(record);
 	return thread;
 }
@@ -252,6 +263,7 @@ export const chatStore: ChatStore = {
 	appendTurnUsage,
 	appendExtractionUsage,
 	appendClarification,
+	appendReplyChat,
 	saveHighlight,
 	deleteHighlight,
 };
