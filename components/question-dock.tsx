@@ -476,7 +476,7 @@ function QuestionDockForm({
 			// Surfaces that own their keys (Tab included) never drive the rows:
 			// the side chat (it may float outside this form), an open menu, and
 			// the highlights panel. Both listeners sit on the document.
-			if (t?.closest?.("[data-clarifier-panel], [data-lh-menu], [data-hl-panel]")) return;
+			if (t?.closest?.("[data-clarifier-panel], [data-lh-menu], [data-hl-panel], [data-calculator]")) return;
 			// A TYPING field is where keys mean text (owner round 4): the
 			// thinking/answer fields, search boxes, renames — never a range
 			// input, whose focus after a click or drag must not kill the
