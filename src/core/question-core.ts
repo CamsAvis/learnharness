@@ -473,6 +473,9 @@ export interface QuestionAnswerData {
 	 *  (or skipping) it. The server copies it from the chat record when the
 	 *  answer lands; whatever the client sent is replaced. */
 	clarifications?: ClarifyExchange[];
+	/** What the learner asked a side-chat helper about the tutor's replies
+	 *  since their previous answer (copied from the record by the server). */
+	replyChats?: ClarifyExchange[];
 	answeredAt: string;
 }
 
@@ -796,5 +799,7 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 function withClarifications(out: Record<string, unknown>, ad: QuestionAnswerData): Record<string, unknown> {
 	if (Array.isArray(ad.clarifications) && ad.clarifications.length > 0)
 		out.clarifications = ad.clarifications.map((c) => ({ asked: c.asked, reply: c.reply }));
+	if (Array.isArray(ad.replyChats) && ad.replyChats.length > 0)
+		out.askedAboutYourReply = ad.replyChats.map((c) => ({ asked: c.asked, reply: c.reply }));
 	return out;
 }

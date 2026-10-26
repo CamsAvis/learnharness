@@ -18,6 +18,9 @@ import type { ClarifyExchange, QuestionAnswerData } from "../src/core/index.ts";
 const ex = (asked: string, reply: string): ClarifyExchange => ({ asked, reply, at: `2026-10-25T00:00:00.00${asked.length % 10}Z` });
 
 const state = (over: Partial<ClarifierState> = {}): ClarifierState => ({
+	kind: "question",
+	targetKey: "question:call_1",
+	tutorSees: true,
 	thread: [],
 	pendingAsk: null,
 	error: null,
@@ -94,6 +97,20 @@ describe("question side chat rendering", () => {
 
 		const failed = renderToStaticMarkup(<ClarifierPanel state={state({ error: "The side-chat model failed" })} variant="side" />);
 		assert.match(failed, /data-testid="clarifier-error"/);
+	});
+
+	it("words the panel for a tutor reply", () => {
+		const html = renderToStaticMarkup(<ClarifierPanel state={state({ kind: "reply" })} variant="side" />);
+		assert.match(html, /About this reply/);
+		assert.match(html, /draw a diagram/);
+		assert.match(html, /placeholder="Why…\? Can you show…\?"/);
+		assert.match(html, /your tutor sees this chat along with your next answer/);
+	});
+
+	it("says the tutor doesn't see a reply chat in a practice session", () => {
+		const html = renderToStaticMarkup(<ClarifierPanel state={state({ kind: "reply", tutorSees: false })} variant="side" />);
+		assert.match(html, /doesn(&#x27;|')t see this chat in practice sessions/);
+		assert.doesNotMatch(html, /your tutor sees this chat/);
 	});
 
 	it("the answered card tucks the side chat behind a count", () => {

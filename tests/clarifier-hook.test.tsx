@@ -40,8 +40,8 @@ function scriptFetch(handler: Handler) {
 const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status }));
 
 let latest!: ClarifierState;
-function Harness({ id }: { id: string | null }) {
-	latest = useClarifier("chat_1", id);
+function Harness({ id, kind = "question" }: { id: string | null; kind?: "question" | "reply" }) {
+	latest = useClarifier("chat_1", id ? { kind, id } : null, undefined, { focusOnTarget: kind === "reply" });
 	return null;
 }
 
@@ -132,5 +132,65 @@ describe("useClarifier", () => {
 		assert.equal(latest.pendingAsk, null);
 		assert.equal(latest.error, null);
 		assert.deepEqual(latest.thread, []);
+	});
+
+	it("switching reply chats lets the earlier request finish, and the next reply can ask at once", async () => {
+		let aborted = false;
+		const first = deferred();
+		const posts: unknown[] = [];
+		scriptFetch((_url, init) => {
+			if (init?.method !== "POST") return json({ thread: [] });
+			const body = JSON.parse(String(init.body)) as { replyId: string };
+			posts.push(body);
+			if (body.replyId === "a2-t0") {
+				init.signal?.addEventListener("abort", () => {
+					aborted = true;
+				});
+				return first.promise;
+			}
+			return json({ thread: [ex("next?")] });
+		});
+		const host = document.createElement("div");
+		document.body.appendChild(host);
+		root = createRoot(host);
+		await act(async () => root!.render(<Harness id="a2-t0" kind="reply" />));
+		let pendingReply!: Promise<void>;
+		await act(async () => {
+			pendingReply = latest.ask("draw it");
+		});
+		await act(async () => root!.render(<Harness id="a3-t0" kind="reply" />));
+		assert.equal(aborted, false, "a reply chat's request still saves, so it isn't cancelled");
+		assert.equal(latest.pendingAsk, null);
+		await act(async () => latest.ask("next?"));
+		assert.deepEqual(latest.thread.map((e) => e.asked), ["next?"]);
+		await act(async () => {
+			first.resolve({ thread: [ex("draw it")] });
+			await pendingReply;
+		});
+		assert.deepEqual(latest.thread.map((e) => e.asked), ["next?"], "the earlier reply's thread never paints onto this one");
+		assert.equal(posts.length, 2);
+	});
+
+	it("talks to the endpoint by replyId for a tutor reply, and takes focus when opened", async () => {
+		const urls: string[] = [];
+		const bodies: unknown[] = [];
+		scriptFetch((url, init) => {
+			urls.push(url);
+			if (init?.method === "POST") {
+				bodies.push(JSON.parse(String(init.body)));
+				return json({ thread: [ex("why?")] });
+			}
+			return json({ thread: [] });
+		});
+		const host = document.createElement("div");
+		document.body.appendChild(host);
+		root = createRoot(host);
+		await act(async () => root!.render(<Harness id="a2-t0" kind="reply" />));
+		assert.equal(urls[0], "/api/chats/chat_1/clarify?replyId=a2-t0");
+		assert.equal(latest.kind, "reply");
+		assert.equal(latest.tutorSees, true, "absent option: the tutor sees it");
+		assert.equal(latest.takeFocus(), true);
+		await act(async () => latest.ask("why?"));
+		assert.deepEqual(bodies[0], { replyId: "a2-t0", text: "why?" });
 	});
 });
