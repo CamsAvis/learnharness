@@ -7,6 +7,7 @@ import { ActivityProvider } from "@/components/activity-dock";
 import { ServerEventsProvider } from "@/components/server-events";
 import { AppearanceProvider } from "@/components/settings/appearance";
 import UpdateBanner from "@/components/update-banner";
+import { CalculatorHost } from "@/components/calculator/calculator-host";
 import { appearanceModeClass, customThemeCss, type CustomTheme } from "@/src/core";
 import { effectiveSettings, getTheme } from "@/src/server";
 
@@ -62,6 +63,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 			</ServerEventsProvider>
 			{/* Auto-update banner (Wave C): fixed card, Electron-only pushes. */}
 			<UpdateBanner />
+			{/* The floating calculator (Alt+C or the bar's calculator button). */}
+			<CalculatorHost />
 		</body>
 		</html>
 	);

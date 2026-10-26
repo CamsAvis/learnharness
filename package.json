@@ -52,6 +52,7 @@
 		"katex": "0.18.2",
 		"linkedom": "^0.18.13",
 		"lucide-react": "^1.33.0",
+		"mathjs": "^15.2.0",
 		"media-chrome": "^4.19.2",
 		"mermaid": "^11.17.0",
 		"motion": "^13.1.1",
